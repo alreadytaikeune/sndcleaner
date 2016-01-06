@@ -1,0 +1,4 @@
+libraries:
+ffmpeg 
+plplot
+
