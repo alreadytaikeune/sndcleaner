@@ -1,15 +1,38 @@
 CC=g++
 LIBS_FFMPEG=-lavutil -lavformat -lavcodec -lswscale -lswresample
-LIBS=-lpthread -lz -lm -lplplotd
-FLAGS=-std=c++11 
-DEPS=sndcleaner.h
-OBJ=sndcleaner.o
-%.o: %.cpp 
-	$(CC) -c -o $@ $< $(LIBS_FFMPEG) $(LIBS) $(FLAGS)
+LIBS_MISC= -lstdc++ -lm -lz -lpthread -lplplotd
+LIBS=$(LIBS_MISC) $(LIBS_FFMPEG)
+CFLAGS=-std=c++11 -g
 
-sndcleaner: $(OBJ) 
-	$(CC) -o $@ $^ $(LIBS_FFMPEG) $(LIBS) $(FLAGS)
 
+LINKER   = gcc -o
+# linking flags here
+LFLAGS   = -Wall 
+
+SRCDIR   = src
+OBJDIR   = obj
+BINDIR   = bin
+
+TARGET=sndcleaner
+SRC=$(wildcard src/**/*.cpp src/*.cpp)
+OBJ=$(SRC:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
+
+$(BINDIR)/$(TARGET): $(OBJ)
+	@echo $(LINKER) $@ $(LFLAGS) $(OBJ) $(LIBS)
+	@$(LINKER) $@ $(LFLAGS) $(OBJ) $(LIBS)
+	@echo "Linking complete!"
+
+$(OBJ): $(OBJDIR)/%.o : $(SRCDIR)/%.cpp
+	@$(CC) $(CFLAGS) -c $< -o $@
+	@echo "Compiled "$<" successfully!"
+
+
+build:
+	@- if [ ! -d "$(OBJDIR)" ]; then mkdir "$(OBJDIR)"; fi
+	@- if [ ! -d "$(BINDIR)" ]; then mkdir "$(BINDIR)"; fi
+
+
+.PHONY: clean
 clean:
-	@- $(RM) $(NAME)
+	@- $(RM) $(TARGET)
 	@- $(RM) $(OBJ)
