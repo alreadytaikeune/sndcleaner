@@ -1,8 +1,8 @@
 CC=g++
 LIBS_FFMPEG=-lavutil -lavformat -lavcodec -lswscale -lswresample
-LIBS_MISC= -lstdc++ -lm -lz -lpthread -lplplotd
+LIBS_MISC= -lstdc++ -lm -lz -lpthread -lplplotd -lSDL2 -lfftw3
 LIBS=$(LIBS_MISC) $(LIBS_FFMPEG)
-CFLAGS=-std=c++11 -g
+CFLAGS=-std=c++11 -g -O0
 
 
 LINKER   = gcc -o

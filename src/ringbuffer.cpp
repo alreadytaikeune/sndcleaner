@@ -4,7 +4,7 @@ size_t rb_get_write_space(RingBuffer *rb){
 	size_t size = 0;
 	int i = 0;
 	for(i=0; i < rb->nb_readers; i++){
-		int rsize = (rb->m_readers[i]-rb->m_writer)%rb->m_size;
+		int rsize = (rb->m_readers[i]+rb->m_size-rb->m_writer-1)%rb->m_size;
 		if(i==0 || rsize < size)
 			size = rsize;
 	}
@@ -15,7 +15,10 @@ size_t rb_get_read_space(RingBuffer *rb, int r){
 	if(r >= rb->nb_readers)
 		return -1;
 	else{
-		return (rb->m_writer - rb->m_readers[r])%rb->m_size;
+		if(rb->m_writer > rb->m_readers[r])
+			return rb->m_writer - rb->m_readers[r];
+		else
+			return (rb->m_writer + rb->m_size-rb->m_readers[r])%rb->m_size;
 	}
 }
 
@@ -29,7 +32,7 @@ size_t rb_read(RingBuffer *rb, uint8_t* target, int r, size_t nb){
 			nb = available;
 		}
 		size_t to_read = nb;
-		if(rb->m_readers[r] + nb > rb->m_size){ // we will have to go back to the beginning 
+		if(rb->m_readers[r] + nb >= rb->m_size){ // we will have to go back to the beginning 
 			to_read = rb->m_size-rb->m_readers[r]; // number of bytes we can read before looping
 		}
 		memcpy(target, rb->m_buffer+rb->m_readers[r], to_read);
@@ -51,7 +54,7 @@ size_t rb_write(RingBuffer* rb, const uint8_t* source, size_t nb){
 		nb = available;
 	}
 	size_t to_write = nb;
-	if(rb->m_writer + nb > rb->m_size){ // we will have to go back to the beginning 
+	if(rb->m_writer + nb >= rb->m_size){ // we will have to go back to the beginning 
 		to_write = rb->m_size-rb->m_writer; // number of bytes we can read before looping
 	}
 	memcpy(rb->m_buffer+rb->m_writer, source, to_write);
@@ -85,7 +88,7 @@ size_t rb_zero(RingBuffer* rb, size_t nb){
 
 
 int rb_create(RingBuffer* rb, size_t length, int r){
-	rb->m_buffer = (uint8_t*) malloc(length*sizeof(uint8_t));
+	rb->m_buffer = (uint8_t*) malloc((length+1)*sizeof(uint8_t));
 	if(!(rb->m_buffer)){
 		std::cerr << "Error: on " << length*sizeof(size_t) << " bytes allocation in rb_create" << std::endl;
 		return -1;
@@ -97,7 +100,19 @@ int rb_create(RingBuffer* rb, size_t length, int r){
     	std::cerr << "Error: on " << r*sizeof(size_t) << " bytes allocation in rb_create" << std::endl;
 		return -1;
     }
-    rb->m_size = length;
+    rb->m_size = length+1;
     rb->nb_readers = r;
+    for(int i=0; i < r; i++){
+    	rb->m_readers[i]=0;
+    }
     return 0;
 }
+
+void print_buffer_stats(RingBuffer* rb){
+	std::cout << "writer at pos: " << rb->m_writer << std::endl;
+	for(int i=0;i<rb->nb_readers;i++){
+		std::cout << "reader " << i << " at pos: " << rb->m_readers[i] << std::endl;
+	}
+
+}
+

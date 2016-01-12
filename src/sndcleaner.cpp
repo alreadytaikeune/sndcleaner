@@ -27,7 +27,6 @@ enum Endianness {BIG, LITTLE, UNDEDFINED};
 Endianness endianness = UNDEDFINED;
 
 typedef struct pthread_dump_arg{
-	uint8_t *stream;
 	int len;
 	SndCleaner* sc;
 } pthread_dump_arg;
@@ -37,13 +36,6 @@ void check_endianness(){
 	char* it = (char *) &i;
 	endianness = (*it == 1) ? LITTLE : BIG;
 	std::cout << endianness << std::endl;
-}
-
-void SndCleaner::print_data_buffer(int offset, int len){
-	for(int i = 0; i < len; i++)
-		std::cout << data_buffer[offset+i] << " ";
-	std::cout << std::endl;
-
 }
 
 template<typename T> void print_array(T* arr, int offset, int len){
@@ -93,8 +85,8 @@ static void queue_flush(PacketQueue *q){
 	AVPacketList* pt = q->first_pkt;
 	q->queue_operation_mutex.lock();
 	while(pt){
-		q->first_pkt=pt->next;
 		q->size-=q->first_pkt->pkt.size;
+		q->first_pkt=pt->next;
 		q->nb_packets--;
 		av_free(pt);
 		pt=q->first_pkt;
@@ -158,20 +150,33 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt) {
 SndCleaner::SndCleaner(){
 	packet_queue_init(&audioq, PACKET_QUEUE_MAX_NB);
 	audioStreamId=-1;
-	data_buffer_idx=0;
 	conversion_out_format.sample_fmt = AV_SAMPLE_FMT_S16;
 	conversion_out_format.sample_rate = OUT_SAMPLE_RATE;
 	conversion_out_format.channel_layout = AV_CH_LAYOUT_MONO;
 	swr = swr_alloc();
+	std::cerr << "trying to create ring buffer" << std::endl;
+	int nb_readers = with_playback ? 2 : 0;
+	int s = rb_create(data_buffer, DATA_BUFFER_SIZE, nb_readers);
+	if(s < 0){
+		std::cerr << "Error creating ring buffer" << std::endl;
+		exit(EXIT_FAILURE);
+	}
+	if(with_playback){
+		player = new Player(data_buffer);
+		player->set_stream_reader_idx(0);
+		player->set_fft_reader_idx(1);
+		int p_status = player->open_with_wanted_specs(OUT_SAMPLE_RATE, 1);
+		if(p_status<0){
+			exit(EXIT_FAILURE);
+		}
+	}
+	std::cerr << "ok" << std::endl;
 }
 
 SndCleaner::~SndCleaner(){
 
 }
 
-void SndCleaner::acquire_data(char * filename){
-	open_stream(filename);	
-}
 
 void SndCleaner::open_stream(char * filename){
 	std::cout << "retrieving " << filename << std::endl;
@@ -267,24 +272,26 @@ void SndCleaner::open_stream(char * filename){
 */
 void* SndCleaner::read_frames(){
 	AVPacket packet;
-	while(av_read_frame(pFormatCtx, &packet)>=0 && !buffer_full) {
+	while(av_read_frame(pFormatCtx, &packet)>=0) {
 		// Is this a packet from the video stream?
 		if(packet.stream_index==audioStreamId) {
 			if(is_full(&audioq)){
 				std::cerr << "Blocking reading, queue is full..." << std::endl;
 			}
-			while(is_full(&audioq) && !buffer_full){
+			while(is_full(&audioq)){
 			}
 			if(buffer_full){
 				queue_flush(&audioq);
 				break;
 			}
 	   		packet_queue_put(&audioq, &packet);
+	   		received_packets=true;
 	  	}
 		else {
 	    	av_free_packet(&packet);
 		}
 	}
+	no_more_packets=true;
 }
 
 
@@ -293,13 +300,13 @@ void* SndCleaner::read_frames(){
 * Pulls from the queue, and waits if not enough data in the queue.
 * Decodes and dumps the packet queue in a stream buffer
 */
-int SndCleaner::dump_queue_in_stream(uint8_t *stream, int len) {
+int SndCleaner::dump_queue(size_t len) {
   int len1, audio_size;
   static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
   static unsigned int audio_buf_size = 0;
   static unsigned int audio_buf_index = 0;
   int first_len = len; 
-  uint8_t* first_stream = stream;
+  int nb_written=0;
   // std::cout << "audio buf index " << audio_buf_index << std::endl;
   // std::cout << "audio buf size " << audio_buf_size << std::endl; 
   while(len > 0) {
@@ -308,10 +315,9 @@ int SndCleaner::dump_queue_in_stream(uint8_t *stream, int len) {
       audio_size = audio_decode_frame(pCodecCtx, audio_buf, sizeof(audio_buf));
       if(audio_size < 0) { // EOF reached ?
 	    /* If error, output silence */
-	    //audio_buf_size = 1024; // arbitrary?
-	    //memset(audio_buf, 0, audio_buf_size);
+	    audio_buf_size = 1024; // arbitrary?
+	    memset(audio_buf, 0, audio_buf_size);
 	    std::cout << "audio size < 0" << std::endl;
-	    break; // exits the while loop and return the number of bytes read.
       } 
       else {
 	    audio_buf_size = audio_size;
@@ -323,10 +329,14 @@ int SndCleaner::dump_queue_in_stream(uint8_t *stream, int len) {
     if(len1 > len)
       len1 = len;
  	//std::cout << "writing " << len1 << " bytes to stream" << std::endl;
-    memcpy(stream, (uint8_t *) audio_buf + audio_buf_index, len1);
-    len -= len1;
-    stream += len1;
-    audio_buf_index += len1;
+    //memcpy(stream, (uint8_t *) audio_buf + audio_buf_index, len1);
+    nb_written=rb_write(data_buffer, (uint8_t *) audio_buf + audio_buf_index, len1);
+    if(nb_written==0){
+    	std::cerr << "WARNING: no more room in the buffer" << std::endl;
+    	break;
+    }
+    len -= nb_written;
+    audio_buf_index += nb_written;
   }
   //print_array((int16_t *)first_stream, 0, first_len/2);
   return first_len - len;
@@ -398,15 +408,15 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
 /*
 *  Processes and writes len number of bytes from the stream to the data buffer. 
 */
-void SndCleaner::write_stream_to_data_buffer(int len){
-	if(data_buffer_idx + len/2 >= DATA_BUFFER_SIZE)
-		len = (DATA_BUFFER_SIZE - data_buffer_idx)*2;
-	memcpy(data_buffer+data_buffer_idx, stream_buffer, len);
-	// we only increment the pointer by len/2 because stream_buffer is uint8_t* and
-	// data_buffer int16_t* 
-	data_buffer_idx+=len/2; 
+// void SndCleaner::write_stream_to_data_buffer(int len){
+// 	if(data_buffer_idx + len/2 >= DATA_BUFFER_SIZE)
+// 		len = (DATA_BUFFER_SIZE - data_buffer_idx)*2;
+// 	memcpy(data_buffer+data_buffer_idx, stream_buffer, len);
+// 	// we only increment the pointer by len/2 because stream_buffer is uint8_t* and
+// 	// data_buffer int16_t* 
+// 	data_buffer_idx+=len/2; 
 
-}
+// }
 
 
 void* sc_read_frames(void* thread_arg){
@@ -418,18 +428,28 @@ void* sc_read_frames(void* thread_arg){
 void* sc_dump_frames(void* thread_arg){
 	std::cout << "starting to dump frames" << std::endl;
 	pthread_dump_arg* arg = (pthread_dump_arg*) thread_arg;
-    uint8_t *stream = (uint8_t *) arg->stream;
     int len = arg->len;
     SndCleaner* sc = arg->sc;
     int l=0;
-    while(sc->data_buffer_idx < DATA_BUFFER_SIZE){
-    	l = sc->dump_queue_in_stream(stream, len);
-		sc->write_stream_to_data_buffer(l);
-    }
+    do{
+    	l = sc->dump_queue(len);
+    	print_buffer_stats(sc->data_buffer);
+    }while(!sc->reached_end() | l>0);
     buffer_full=true;
+    sc->player->quit_all();
     swr_free(&(sc->swr));
 }
 
+
+bool SndCleaner::reached_end(){
+	std::cout << "checking should continue" << std::endl;
+	if(!received_packets)
+		return false;
+
+	bool b = no_more_packets && is_empty(&audioq);
+	std::cout << "reached end " << b << std::endl;
+	return b;
+}
 
 void plotData(int16_t* data, int len, int nsize){
 	PLFLT x[nsize];
@@ -438,6 +458,8 @@ void plotData(int16_t* data, int len, int nsize){
 		std::cerr << "unable to allocate memory" << std::endl;
 		exit(EXIT_FAILURE);
 	}
+
+	std::cout << "len is " << len << std::endl;
 
 	PLFLT max_value = (PLFLT) max_abs(data, len);
     PLFLT xmin = 0., xmax = len/((float) OUT_SAMPLE_RATE), ymin = 0., ymax = 1.0;
@@ -480,6 +502,10 @@ void plotData(int16_t* data, int len, int nsize){
 
 
 int main(int argc, char *argv[]) {
+	if(argc < 2) {
+    	std::cerr << "Usage: sndcleaner <file>\n" << std::endl;
+    	exit(1);
+  	}
 	check_endianness();
 	av_register_all();
 	SndCleaner cleaner; 
@@ -491,7 +517,6 @@ int main(int argc, char *argv[]) {
 	pthread_dump_arg dump_args;
 
 	dump_args.len = STREAM_BUFFER_SIZE;
-	dump_args.stream = cleaner.stream_buffer;
 	dump_args.sc = &cleaner;
 
 	std::cout << "lauching threads" << std::endl;
@@ -504,9 +529,8 @@ int main(int argc, char *argv[]) {
                    NULL,
                    sc_dump_frames,
                    (void *) &dump_args);
-
+	cleaner.player->start_playback();
 	pthread_join(read_thread, NULL);
 	pthread_join(dump_thread, NULL);
-	plotData(cleaner.data_buffer, cleaner.data_buffer_idx, 10000);
 	return 0;
 }
