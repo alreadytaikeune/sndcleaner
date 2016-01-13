@@ -267,9 +267,6 @@ void SndCleaner::open_stream(char * filename){
 
 
 
-/*
-* Read frames and process them before storing data in data_buffer
-*/
 void* SndCleaner::read_frames(){
 	AVPacket packet;
 	while(av_read_frame(pFormatCtx, &packet)>=0) {
@@ -431,11 +428,19 @@ void* sc_dump_frames(void* thread_arg){
     int len = arg->len;
     SndCleaner* sc = arg->sc;
     int l=0;
+    int i=0;
     do{
     	l = sc->dump_queue(len);
     	print_buffer_stats(sc->data_buffer);
+    	i++;
+    	if(i>150)
+    		break;
     }while(!sc->reached_end() | l>0);
+    exit(EXIT_FAILURE);
     buffer_full=true;
+    while(rb_get_max_read_space(sc->data_buffer)>0){
+
+    }
     sc->player->quit_all();
     swr_free(&(sc->swr));
 }

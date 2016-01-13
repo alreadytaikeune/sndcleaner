@@ -309,7 +309,7 @@ double Player::get_audio_clock(){
 }
 
 void Player::quit_all(){
-	printf("quting all \n");
+	printf("quiting all \n");
 	quit=1;
 	SDL_Event e;
   	e.type = SDL_QUIT;

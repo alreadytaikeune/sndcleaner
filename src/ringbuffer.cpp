@@ -22,6 +22,17 @@ size_t rb_get_read_space(RingBuffer *rb, int r){
 	}
 }
 
+size_t rb_get_max_read_space(RingBuffer* rb){
+	size_t ret=0, tmp;
+	int i;
+	for(i=0;i<rb->nb_readers;i++){
+		tmp=rb_get_read_space(rb, i);
+		if(tmp > ret)
+			ret=tmp;
+	}
+	return ret;
+}
+
 size_t rb_read(RingBuffer *rb, uint8_t* target, int r, size_t nb){
 	size_t available = rb_get_read_space(rb, r);
 	if(available <= 0)

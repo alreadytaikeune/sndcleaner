@@ -4,7 +4,7 @@
 
 #define DATA_QUEUE_SIZE 10
 #define FFT_SIZE 2048
-#define SDL_AUDIO_BUFFER_SIZE 2048
+#define SDL_AUDIO_BUFFER_SIZE 8192
 
 typedef struct DataList{
 	double* data;
