@@ -1,10 +1,11 @@
 #include <SDL2/SDL.h>
 #include "ringbuffer.h"
 #include <fftw3.h>
+#include <pthread.h>
 
 #define DATA_QUEUE_SIZE 10
 #define FFT_SIZE 2048
-#define SDL_AUDIO_BUFFER_SIZE 8192
+#define SDL_AUDIO_BUFFER_SIZE 2048
 
 typedef struct DataList{
 	double* data;
@@ -33,6 +34,7 @@ public:
 	void start_playback();
 	void video_display(double* data, int l);
 	void quit_all();
+	void set_cond_wait_parameters(pthread_mutex_t* m, pthread_cond_t* c);
 	DataQueue 		dataq;
 	RingBuffer* 	data_source; // source from which to pull the data
 	int				stream_reader_idx=-1; // index of the reader in the ring buffer
@@ -56,4 +58,6 @@ public:
   	SDL_Thread 		*video_tid;
   	fftw_plan 		trans;
 	fftw_complex 	*fft_in,*fft_out;
+	pthread_mutex_t *data_mutex;
+	pthread_cond_t 	*data_available_cond; 
 };

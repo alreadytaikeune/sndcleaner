@@ -11,7 +11,7 @@ extern "C" {
 
 #define FF_REFRESH_EVENT (SDL_USEREVENT)
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
-#define DEBUG_LEVEL 2
+#define DEBUG_LEVEL 1
 
 static bool is_full(DataQueue* q){
 	if(!q){
@@ -102,10 +102,13 @@ static int data_queue_get(DataQueue* q, DataList* datal_ptr){
 void audio_callback(void *userdata, Uint8 *stream, int len) {
 	Player* pl = (Player*)userdata;
 	int lread=0;
+	pthread_mutex_lock(pl->data_mutex);
 	while(len > 0 && !pl->quit) {
 		lread=rb_read(pl->data_source, (uint8_t *) stream+lread, pl->stream_reader_idx, (size_t) len);
 		len-=lread;
 	}
+	pthread_cond_signal(pl->data_available_cond);
+	pthread_mutex_unlock(pl->data_mutex); // Very important for the matching pthread_cond_wait() routine to complete	
 	pl->audio_clock+=pl->audio_frame_duration;
 }
 
@@ -124,7 +127,6 @@ static void schedule_refresh(Player *pl, int delay) {
 }
 
 void video_refresh_timer(void *userdata) {
-	printf("refreshing timer \n");
 	Player* pl = (Player *) userdata;
 	if(pl->quit)
 		return;
@@ -187,15 +189,15 @@ static int video_thread(void *arg) {
 	}
 	for(;;){
 		spectrum=(double *) malloc(sizeof(double)*FFT_SIZE/2); // freed in the video thread
-		if(DEBUG_LEVEL > 1)
-			printf("Allocated spectrum pointer at %p \n", spectrum);
 		len=flen;
 		lread=0;
-		// printf("Reading %d bytes of data... \n", len);
+		pthread_mutex_lock(pl->data_mutex);
 		while(len>0 && !pl->quit){
 			lread=rb_read(pl->data_source, (uint8_t *) pulled_data+lread, pl->fft_reader_idx, (size_t) len);
 			len-=lread;
 		}
+		pthread_cond_signal(pl->data_available_cond);
+		pthread_mutex_unlock(pl->data_mutex); // Very important for the matching pthread_cond_wait() routine to complete
 		if(pl->quit){
 			printf("quiting...\n");
 			break;
@@ -217,7 +219,7 @@ static int video_thread(void *arg) {
 			}
 		}
 		
-		print_buffer_stats(pl->data_source);
+		//print_buffer_stats(pl->data_source);
 	}
 	return 0;
 }
@@ -241,11 +243,16 @@ void Player::video_display(double* data, int l){
     if(w < l)
     	idx_max=w;
 
-    double spec_max = max(data, idx_max);
+    // double spec_max = max(data, idx_max);
+    double spec_max = 400000; /// arbitrary
     SDL_LockMutex(screen_mutex);
+    double rh;
     for(i=0;i<idx_max;i++){
     	r.x=i;
-    	r.h=-data[i]*(h-bottom_padding)/spec_max;
+    	rh = -data[i]*(h-bottom_padding)/spec_max;
+    	if(rh < bottom_padding-h)
+    		rh=bottom_padding-h;
+    	r.h=rh;
     	SDL_RenderFillRect(renderer, &r );
     }
     SDL_RenderPresent(renderer);
@@ -263,7 +270,7 @@ Player::Player(RingBuffer* b){
   	window = SDL_CreateWindow("Spectrum",
                           SDL_WINDOWPOS_UNDEFINED,
                           SDL_WINDOWPOS_UNDEFINED,
-                          640, 480,
+                          1025, 480,
                           0);
   	if(!window){
   		fprintf(stderr, "Could not create screen SDL - %s\n", SDL_GetError());
@@ -366,4 +373,10 @@ int Player::open_with_wanted_specs(int sr, Uint8 channel_nb){
     printf("SDL audio has been opened and is ready to play\n");
     return 0;
 
+}
+
+
+void Player::set_cond_wait_parameters(pthread_mutex_t* m, pthread_cond_t* c){
+	data_mutex=m;
+	data_available_cond=c;
 }

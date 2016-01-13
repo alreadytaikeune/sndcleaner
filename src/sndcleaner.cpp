@@ -2,7 +2,6 @@
 #include <iostream>
 #include "sndcleaner.h"
 #include <assert.h>
-#include <pthread.h>
 #include "utils.h"
 
 
@@ -40,7 +39,7 @@ void check_endianness(){
 
 template<typename T> void print_array(T* arr, int offset, int len){
 	for(T* it = arr; it <  arr + offset + len; ++it)
-		std::cout << (int) *it << " ";
+		std::cout << *it << " ";
 	std::cout << std::endl;
 }
 
@@ -161,6 +160,10 @@ SndCleaner::SndCleaner(){
 		std::cerr << "Error creating ring buffer" << std::endl;
 		exit(EXIT_FAILURE);
 	}
+	/* Initialize mutex and condition variable objects */
+  	pthread_mutex_init(&data_mutex, NULL);
+  	pthread_cond_init (&data_available_cond, NULL);
+
 	if(with_playback){
 		player = new Player(data_buffer);
 		player->set_stream_reader_idx(0);
@@ -169,6 +172,7 @@ SndCleaner::SndCleaner(){
 		if(p_status<0){
 			exit(EXIT_FAILURE);
 		}
+		player->set_cond_wait_parameters(&data_mutex, &data_available_cond);
 	}
 	std::cerr << "ok" << std::endl;
 }
@@ -265,6 +269,31 @@ void SndCleaner::open_stream(char * filename){
 	std::cout << "stream successfully opened" << std::endl;
 }
 
+/*
+*	Returns the number of packets added or -1 if we reached the end of the available packets
+*/
+int SndCleaner::fill_packet_queue(){
+	int nb=0;
+	AVPacket packet;
+	while(!is_full(&audioq)){
+		int s = av_read_frame(pFormatCtx, &packet);
+		while(s>=0) {
+			if(packet.stream_index==audioStreamId) {
+				if(packet_queue_put(&audioq, &packet)>=0){
+					nb++;
+				}
+				break;
+			}
+			else {
+	    		av_free_packet(&packet);
+			}
+			s=av_read_frame(pFormatCtx, &packet);
+		}
+		if(s<0)
+			return -1;
+	}
+	return nb;
+}
 
 
 void* SndCleaner::read_frames(){
@@ -315,6 +344,7 @@ int SndCleaner::dump_queue(size_t len) {
 	    audio_buf_size = 1024; // arbitrary?
 	    memset(audio_buf, 0, audio_buf_size);
 	    std::cout << "audio size < 0" << std::endl;
+	    std::cout << audioq.nb_packets << std::endl;
       } 
       else {
 	    audio_buf_size = audio_size;
@@ -329,7 +359,7 @@ int SndCleaner::dump_queue(size_t len) {
     //memcpy(stream, (uint8_t *) audio_buf + audio_buf_index, len1);
     nb_written=rb_write(data_buffer, (uint8_t *) audio_buf + audio_buf_index, len1);
     if(nb_written==0){
-    	std::cerr << "WARNING: no more room in the buffer" << std::endl;
+    	//std::cerr << "WARNING: no more room in the buffer" << std::endl;
     	break;
     }
     len -= nb_written;
@@ -349,7 +379,8 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
   static int audio_pkt_size = 0;
   static AVFrame frame;
   static int count_in;
-  static int bytes_per_sample = av_get_bytes_per_sample(pCodecCtx->sample_fmt); // can be moved for optimization
+  // static int bytes_per_sample = av_get_bytes_per_sample(pCodecCtx->sample_fmt); // can be moved for optimization
+  static int bytes_per_sample = 2; // can be moved for optimization
 
   int len1, data_size = 0;
   int nb_written = 0;
@@ -368,15 +399,15 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
       data_size = 0;
       nb_written = 0;
       if(got_frame) {
-	    data_size = av_samples_get_buffer_size(NULL, 
+	    data_size = av_samples_get_buffer_size(frame.linesize, 
 					       pCodecCtx->channels,
 					       frame.nb_samples,
 					       pCodecCtx->sample_fmt,
 					       1); // Total number of bytes pulled from the packet, not per channel!!
 	    assert(data_size <= buf_size);
+
 	    count_in = frame.nb_samples;
 	    nb_written = swr_convert(swr, &audio_buf, buf_size, (const uint8_t**) frame.extended_data, count_in);
-	    //print_array((int16_t *)audio_buf, 0, nb_written);
 	    if(nb_written <= 0){
 	    	std::cerr << "error converting data" << std::endl;
 	    	exit(EXIT_FAILURE);
@@ -430,12 +461,22 @@ void* sc_dump_frames(void* thread_arg){
     int l=0;
     int i=0;
     do{
+    	if(rb_get_write_space(sc->data_buffer) < 3*len){
+    		std::cout << "not enough write space: " << rb_get_write_space(sc->data_buffer) << std::endl;
+    		pthread_mutex_lock(&sc->data_mutex);
+    		while (rb_get_write_space(sc->data_buffer) < len){
+    			pthread_cond_wait(&sc->data_available_cond, &sc->data_mutex);
+    		}
+    		pthread_mutex_unlock(&sc->data_mutex);
+    	}
+    	
+    	sc->fill_packet_queue();
     	l = sc->dump_queue(len);
-    	print_buffer_stats(sc->data_buffer);
-    	i++;
-    	if(i>150)
-    		break;
-    }while(!sc->reached_end() | l>0);
+    	//print_buffer_stats(sc->data_buffer);
+    	// i++;
+    	// if(i>150)
+    	// 	break;
+    }while((!sc->reached_end() | l>0) && !sc->player->quit);
     exit(EXIT_FAILURE);
     buffer_full=true;
     while(rb_get_max_read_space(sc->data_buffer)>0){
@@ -447,12 +488,12 @@ void* sc_dump_frames(void* thread_arg){
 
 
 bool SndCleaner::reached_end(){
-	std::cout << "checking should continue" << std::endl;
+	//std::cout << "checking should continue" << std::endl;
 	if(!received_packets)
 		return false;
 
 	bool b = no_more_packets && is_empty(&audioq);
-	std::cout << "reached end " << b << std::endl;
+	//std::cout << "reached end " << b << std::endl;
 	return b;
 }
 
@@ -526,10 +567,10 @@ int main(int argc, char *argv[]) {
 
 	std::cout << "lauching threads" << std::endl;
 
-	pthread_create(&read_thread,
-                   NULL,
-                   sc_read_frames,
-                   (void *) &cleaner);
+	// pthread_create(&read_thread,
+ //                   NULL,
+ //                   sc_read_frames,
+ //                   (void *) &cleaner);
 	pthread_create(&dump_thread,
                    NULL,
                    sc_dump_frames,

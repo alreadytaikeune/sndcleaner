@@ -39,7 +39,7 @@ size_t rb_read(RingBuffer *rb, uint8_t* target, int r, size_t nb){
 		return 0;
 	else{
 		if(nb > available){
-			std::cout << "Warning: trying to read " << nb << " bytes from ring buffer but only " << available << " available" << std::endl;
+			//std::cout << "Warning: trying to read " << nb << " bytes from ring buffer but only " << available << " available" << std::endl;
 			nb = available;
 		}
 		size_t to_read = nb;
@@ -61,7 +61,7 @@ size_t rb_write(RingBuffer* rb, const uint8_t* source, size_t nb){
 		return 0;
 	size_t available = rb_get_write_space(rb);
 	if(nb > available){
-		std::cout << "Warning: trying to write " << nb << " bytes from ring buffer but only " << available << " available" << std::endl;	
+		//std::cout << "Warning: trying to write " << nb << " bytes from ring buffer but only " << available << " available" << std::endl;	
 		nb = available;
 	}
 	size_t to_write = nb;
@@ -70,7 +70,7 @@ size_t rb_write(RingBuffer* rb, const uint8_t* source, size_t nb){
 	}
 	memcpy(rb->m_buffer+rb->m_writer, source, to_write);
 	if(to_write < nb){
-		memcpy(rb->m_buffer, source, nb-to_write);
+		memcpy(rb->m_buffer, source+to_write, nb-to_write);
 	}
 	rb->m_writer = (rb->m_writer + nb)%rb->m_size;
 	return nb;

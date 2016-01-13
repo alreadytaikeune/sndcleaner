@@ -16,6 +16,7 @@ extern "C" {
 #include <mutex>
 #include "ringbuffer.h"
 #include "player.h"
+#include <pthread.h>
 
 #define MAX_AUDIO_FRAME_SIZE 192000
 #define MINUTES_IN_BUFFER 1
@@ -49,7 +50,7 @@ public:
 	SndCleaner();
 	~SndCleaner();
 	void* read_frames();
-
+	int fill_packet_queue();
 	// void dump_queue_in_stream(uint8_t *stream, int len);
 	int dump_queue(size_t len);
 	int audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf, int buf_size);
@@ -63,6 +64,10 @@ public:
 	RingBuffer* data_buffer = (RingBuffer *) malloc(sizeof(RingBuffer));
 	SwrContext *swr; // the resampling context for outputting with standard format in data_buffer
 	Player* player;
+	pthread_mutex_t data_mutex;
+	// Condition for write availability in the data buffer not to do busy wait
+	// in the dump_queue method
+	pthread_cond_t data_available_cond; 
 private:
 	AVFormatContext *pFormatCtx = NULL;
 	AVCodecContext *pCodecCtx = NULL; // the audio codec
