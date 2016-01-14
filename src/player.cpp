@@ -13,6 +13,12 @@ extern "C" {
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
 #define DEBUG_LEVEL 1
 
+static int dl_free(DataList* dl){
+	free(dl->data);
+	free(dl);
+}
+
+
 static bool is_full(DataQueue* q){
 	if(!q){
 		std::cerr << "Packets queue is null" << std::endl;
@@ -29,7 +35,7 @@ static bool is_full(DataQueue* q){
 static int data_queue_put(DataQueue* q, double* data, double pts){
 	if(DEBUG_LEVEL > 1)
 		printf("putting data at %p in queue, size is %d \n", data, q->nb_frames);
-	int ret;
+	int ret=0;
 	if(q->nb_frames==q->nb_frames_max){
 		return -1;
 	}
@@ -52,12 +58,23 @@ static int data_queue_put(DataQueue* q, double* data, double pts){
 	return ret;
 }
 
+static void queue_flush(DataQueue *q){
+	SDL_LockMutex(q->dataq_mutex);
+	DataList* pt = q->first_frame;
+	while(pt){
+		q->first_frame=pt->next;
+		q->nb_frames--;
+		dl_free(pt);
+		pt=q->first_frame;
+	}
+	SDL_CondSignal(q->dataq_cond);
+	SDL_UnlockMutex(q->dataq_mutex);
+}
 
 static void print_queue(DataQueue* q){
 	if(!q)
 		return;
 	DataList* l = q->first_frame;
-	int i=0;
 	while(l){
 		printf("Data at %p: \n", l);
 		printf("\t -data at: %p\n", l->data);
@@ -81,16 +98,14 @@ static int data_queue_get(DataQueue* q, DataList* datal_ptr){
 			q->last_frame=NULL;
 		q->nb_frames--;
 		*datal_ptr=*fframe;
-		// printf("Data dequeued at %p: \n", datal_ptr);
-		// printf("\t -data at: %p\n", datal_ptr->data);
-		// printf("\t -pts: %lf\n", datal_ptr->pts);
-		// printf("\n");
+		free(fframe);
 		datal_ptr->next=NULL;
 		ret=1;
 	}
 	else{
 		ret=0;
 	}
+	SDL_CondSignal(q->dataq_cond);
 	SDL_UnlockMutex(q->dataq_mutex);
 	return ret;
 }
@@ -106,6 +121,12 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
 	while(len > 0 && !pl->quit) {
 		lread=rb_read(pl->data_source, (uint8_t *) stream+lread, pl->stream_reader_idx, (size_t) len);
 		len-=lread;
+		if(lread==0 && pl->no_more_data){
+  			(pl->event).type = SDL_QUIT;
+  			pthread_mutex_unlock(pl->data_mutex);
+  			SDL_PushEvent(&pl->event);
+			return;
+		}
 	}
 	pthread_cond_signal(pl->data_available_cond);
 	pthread_mutex_unlock(pl->data_mutex); // Very important for the matching pthread_cond_wait() routine to complete	
@@ -135,17 +156,18 @@ void video_refresh_timer(void *userdata) {
 	if(!pl->data_source){
 		printf("data source null\n");
 		schedule_refresh(pl, 100);
+		free(datal);
 		return;
 	}
-	// print_queue(&pl->dataq);
-	if(data_queue_get(&(pl->dataq), datal) > 0){
+
+	int s = data_queue_get(&(pl->dataq), datal);
+	if(s>0){
 		delay = datal->pts - pl->frame_last_pts;
 		pl->frame_last_delay = delay;
       	pl->frame_last_pts = datal->pts;
       	/* update delay to sync to audio */
       	ref_clock = pl->get_audio_clock();
       	diff = datal->pts - ref_clock;
-
       	pl->frame_timer += delay;
 
       	/* computer the REAL delay */
@@ -187,40 +209,48 @@ static int video_thread(void *arg) {
 	if(!(pl->data_source)){
 		printf("null\n");
 	}
+	bool out=false;
 	for(;;){
 		spectrum=(double *) malloc(sizeof(double)*FFT_SIZE/2); // freed in the video thread
 		len=flen;
 		lread=0;
+
 		pthread_mutex_lock(pl->data_mutex);
 		while(len>0 && !pl->quit){
 			lread=rb_read(pl->data_source, (uint8_t *) pulled_data+lread, pl->fft_reader_idx, (size_t) len);
 			len-=lread;
+			if(lread==0 && pl->no_more_data){
+				std::cout << "no more data" << std::endl;
+				out=true;
+				break;
+			}
+
 		}
 		pthread_cond_signal(pl->data_available_cond);
 		pthread_mutex_unlock(pl->data_mutex); // Very important for the matching pthread_cond_wait() routine to complete
+	
+		if(out)
+			break;
 		if(pl->quit){
 			printf("quiting...\n");
 			break;
 		}
-			
-		for(i=0;i<FFT_SIZE;i++){
-			pl->fft_in[0][i]=(double) pulled_data[i];
-		}
-		fftw_execute(pl->trans);
-		for(i=0;i<FFT_SIZE/2;i++){
-			spectrum[i]=sqrt(pow(pl->fft_out[i][0],2)+pow(pl->fft_out[i][1],2));
-		}
-		double pts = pl->last_queued_pts+pl->video_frame_duration;
-		while(1){
-			if(!is_full(&pl->dataq)){
-				data_queue_put(&pl->dataq, spectrum, pts);
-				pl->last_queued_pts = pts;
-				break;
-			}
-		}
 		
+		pl->spmanager->compute_spectrum(pulled_data, spectrum);
+
+		double pts = pl->last_queued_pts+pl->video_frame_duration;
+		SDL_LockMutex(pl->dataq.dataq_mutex);
+		while(is_full(&pl->dataq) && !pl->quit){
+			SDL_CondWait(pl->dataq.dataq_cond, pl->dataq.dataq_mutex);
+		}
+		SDL_UnlockMutex(pl->dataq.dataq_mutex);
+		data_queue_put(&pl->dataq, spectrum, pts);
+		pl->last_queued_pts = pts;
+
 		//print_buffer_stats(pl->data_source);
 	}
+	free(pulled_data);
+	printf("Out the video thread \n");
 	return 0;
 }
 
@@ -228,8 +258,10 @@ static int video_thread(void *arg) {
 void Player::video_display(double* data, int l){
 	SDL_Rect r;
 	int w, h;
-	int bottom_padding=20;
+	int bottom_padding=0;
 	int i;
+	if(quit)
+		return;
 	SDL_GetWindowSize(window, &w, &h);
 	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255 );
 	// Clear window
@@ -244,7 +276,7 @@ void Player::video_display(double* data, int l){
     	idx_max=w;
 
     // double spec_max = max(data, idx_max);
-    double spec_max = 400000; /// arbitrary
+    double spec_max = 500000; /// arbitrary
     SDL_LockMutex(screen_mutex);
     double rh;
     for(i=0;i<idx_max;i++){
@@ -255,6 +287,7 @@ void Player::video_display(double* data, int l){
     	r.h=rh;
     	SDL_RenderFillRect(renderer, &r );
     }
+
     SDL_RenderPresent(renderer);
     SDL_UnlockMutex(screen_mutex);
     video_clock+=video_frame_duration;
@@ -262,7 +295,6 @@ void Player::video_display(double* data, int l){
 
 Player::Player(RingBuffer* b){
 	data_source = b;
-	dataq.dataq_mutex = SDL_CreateMutex();
 	if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER)) {
     	fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
     	exit(1);
@@ -277,7 +309,6 @@ Player::Player(RingBuffer* b){
     	exit(1);
   	}
 
-  	screen = SDL_GetWindowSurface(window);
 	renderer = SDL_CreateRenderer(window, -1, 0);
 	screen_mutex = SDL_CreateMutex();
 	if(renderer == NULL)
@@ -291,6 +322,19 @@ Player::Player(RingBuffer* b){
   	fft_in=fftw_alloc_complex(FFT_SIZE);
 	fft_out=fftw_alloc_complex(FFT_SIZE);
 	trans=fftw_plan_dft_1d(FFT_SIZE,fft_in,fft_out,FFTW_FORWARD,FFTW_MEASURE);
+
+	pthread_mutex_init(quit_mutex, NULL);
+  	pthread_cond_init (quit_cond, NULL);
+
+}
+
+
+Player::~Player(){
+	fftw_free(fft_in);
+	fftw_free(fft_out);
+	fftw_destroy_plan(trans);
+	pthread_mutex_destroy(quit_mutex);
+	pthread_cond_destroy(quit_cond);
 }
 
 
@@ -298,6 +342,7 @@ void Player::data_queue_init(int fl, int size){
 	memset(&dataq, 0, sizeof(DataQueue));
   	dataq.nb_frames_max=size;
   	dataq.dataq_mutex=SDL_CreateMutex();
+  	dataq.dataq_cond=SDL_CreateCond();
   	dataq.frame_length=fl;
   	dataq.nb_frames=0;
 }
@@ -318,10 +363,24 @@ double Player::get_audio_clock(){
 void Player::quit_all(){
 	printf("quiting all \n");
 	quit=1;
-	SDL_Event e;
-  	e.type = SDL_QUIT;
+  	event.type = SDL_QUIT;
   	SDL_PushEvent(&event);
 }
+
+
+void Player::_quit_all(){
+	int status=0;
+	quit = 1;
+	printf("joining thread\n");
+	queue_flush(&dataq);
+	SDL_WaitThread(video_tid, &status);
+	printf("joined with status %d\n", status);
+	pthread_mutex_lock(quit_mutex);
+	pthread_cond_signal(quit_cond);
+	pthread_mutex_unlock(quit_mutex);
+	SDL_Quit();
+}
+
 
 void Player::start_playback(){
 	printf("Starting playback...");
@@ -335,8 +394,8 @@ void Player::start_playback(){
     	switch(event.type) {
     	case FF_QUIT_EVENT:
     	case SDL_QUIT:
-      		quit = 1;
-      		SDL_Quit();
+      		
+      		return;
       		break;
     	case FF_REFRESH_EVENT:
       		video_refresh_timer(event.user.data1);
@@ -345,6 +404,7 @@ void Player::start_playback(){
       		break;
     }
   }
+  printf("quiting playback\n");
 }
 
 
@@ -376,7 +436,17 @@ int Player::open_with_wanted_specs(int sr, Uint8 channel_nb){
 }
 
 
-void Player::set_cond_wait_parameters(pthread_mutex_t* m, pthread_cond_t* c){
+void Player::set_cond_wait_write_parameters(pthread_mutex_t* m, pthread_cond_t* c){
 	data_mutex=m;
 	data_available_cond=c;
+}
+
+void Player::set_spectrum_manager(SpectrumManager* sm){
+	spmanager=sm;
+	spmanager->set_fft_size(FFT_SIZE);
+}
+
+void Player::register_for_quit_callback(pthread_mutex_t* mut, pthread_cond_t* cond){
+	mut=quit_mutex;
+	cond=quit_cond;
 }

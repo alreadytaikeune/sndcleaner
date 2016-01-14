@@ -161,8 +161,10 @@ SndCleaner::SndCleaner(){
 		exit(EXIT_FAILURE);
 	}
 	/* Initialize mutex and condition variable objects */
-  	pthread_mutex_init(&data_mutex, NULL);
-  	pthread_cond_init (&data_available_cond, NULL);
+  	pthread_mutex_init(&data_writable_mutex, NULL);
+  	pthread_cond_init (&data_writable_cond, NULL);
+
+  	spmanager=new SpectrumManager(2048, WINDOW_BLACKMAN);
 
 	if(with_playback){
 		player = new Player(data_buffer);
@@ -172,13 +174,18 @@ SndCleaner::SndCleaner(){
 		if(p_status<0){
 			exit(EXIT_FAILURE);
 		}
-		player->set_cond_wait_parameters(&data_mutex, &data_available_cond);
+		player->set_cond_wait_write_parameters(&data_writable_mutex, &data_writable_cond);
+		player->set_spectrum_manager(spmanager);
 	}
 	std::cerr << "ok" << std::endl;
 }
 
 SndCleaner::~SndCleaner(){
-
+	free(data_buffer);
+	delete player;
+	delete spmanager;
+	pthread_mutex_destroy(&data_writable_mutex);
+	pthread_cond_destroy(&data_writable_cond);
 }
 
 
@@ -279,6 +286,7 @@ int SndCleaner::fill_packet_queue(){
 		int s = av_read_frame(pFormatCtx, &packet);
 		while(s>=0) {
 			if(packet.stream_index==audioStreamId) {
+				received_packets=true;
 				if(packet_queue_put(&audioq, &packet)>=0){
 					nb++;
 				}
@@ -289,8 +297,11 @@ int SndCleaner::fill_packet_queue(){
 			}
 			s=av_read_frame(pFormatCtx, &packet);
 		}
-		if(s<0)
+		if(s<0){
+			no_more_packets=true;
 			return -1;
+		}
+			
 	}
 	return nb;
 }
@@ -341,6 +352,8 @@ int SndCleaner::dump_queue(size_t len) {
       audio_size = audio_decode_frame(pCodecCtx, audio_buf, sizeof(audio_buf));
       if(audio_size < 0) { // EOF reached ?
 	    /* If error, output silence */
+	    if(no_more_packets)
+	    	return 0;
 	    audio_buf_size = 1024; // arbitrary?
 	    memset(audio_buf, 0, audio_buf_size);
 	    std::cout << "audio size < 0" << std::endl;
@@ -462,36 +475,41 @@ void* sc_dump_frames(void* thread_arg){
     int i=0;
     do{
     	if(rb_get_write_space(sc->data_buffer) < 3*len){
-    		std::cout << "not enough write space: " << rb_get_write_space(sc->data_buffer) << std::endl;
-    		pthread_mutex_lock(&sc->data_mutex);
+    		//std::cout << "not enough write space: " << rb_get_write_space(sc->data_buffer) << std::endl;
+    		pthread_mutex_lock(&sc->data_writable_mutex);
     		while (rb_get_write_space(sc->data_buffer) < len){
-    			pthread_cond_wait(&sc->data_available_cond, &sc->data_mutex);
+    			pthread_cond_wait(&sc->data_writable_cond, &sc->data_writable_mutex);
     		}
-    		pthread_mutex_unlock(&sc->data_mutex);
+    		pthread_mutex_unlock(&sc->data_writable_mutex);
     	}
     	
     	sc->fill_packet_queue();
     	l = sc->dump_queue(len);
-    	//print_buffer_stats(sc->data_buffer);
-    	// i++;
-    	// if(i>150)
-    	// 	break;
     }while((!sc->reached_end() | l>0) && !sc->player->quit);
-    exit(EXIT_FAILURE);
     buffer_full=true;
-    while(rb_get_max_read_space(sc->data_buffer)>0){
+    sc->player->no_more_data=true;
 
+    pthread_mutex_t* quit_mutex=NULL;
+	// Condition for write availability in the data buffer not to do busy wait
+	// in the dump_queue method
+	pthread_cond_t* quit_cond=NULL;
+
+	sc->player->register_for_quit_callback(quit_mutex, quit_cond);
+    pthread_mutex_lock(quit_mutex);
+
+    while(rb_get_max_read_space(sc->data_buffer)>0 && !sc->player->quit){
+    	//print_buffer_stats(sc->data_buffer);
+		pthread_cond_wait(quit_cond, quit_mutex);
     }
-    sc->player->quit_all();
+    pthread_mutex_unlock(quit_mutex);
+    //sc->player->quit_all();
     swr_free(&(sc->swr));
 }
 
 
 bool SndCleaner::reached_end(){
-	//std::cout << "checking should continue" << std::endl;
 	if(!received_packets)
 		return false;
-
 	bool b = no_more_packets && is_empty(&audioq);
 	//std::cout << "reached end " << b << std::endl;
 	return b;
@@ -576,7 +594,7 @@ int main(int argc, char *argv[]) {
                    sc_dump_frames,
                    (void *) &dump_args);
 	cleaner.player->start_playback();
-	pthread_join(read_thread, NULL);
 	pthread_join(dump_thread, NULL);
+	std::cout << "dump thread joined" << std::endl;
 	return 0;
 }
