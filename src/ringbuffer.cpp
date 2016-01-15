@@ -127,3 +127,8 @@ void print_buffer_stats(RingBuffer* rb){
 
 }
 
+void rb_free(RingBuffer* rb){
+	free(rb->m_buffer);
+	free(rb->m_readers);
+	free(rb);
+}

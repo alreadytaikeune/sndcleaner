@@ -35,7 +35,5 @@ void apply_mask(double** data, int** out, int w, int h, Mask* m){
 				out[j][i] = tmp > 0 ? 1 : 0;
 			}
 		}
-
-
 	}
 }

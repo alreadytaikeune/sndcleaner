@@ -57,6 +57,10 @@ public:
 	int audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf, int buf_size);
 	void audio_callback(void *userdata, Uint8 *stream, int len); // Callback called by the SDL
 	bool reached_end();
+	bool get_player_quit();
+	void start_playback();
+	bool supports_playback();
+	void compute_spectrogram();
 	//void write_stream_to_data_buffer(int len);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 
@@ -64,20 +68,20 @@ public:
 	//int16_t *data_buffer = (int16_t *) malloc(DATA_BUFFER_SIZE*sizeof(int16_t)); // Allocate in the heap
 	RingBuffer* data_buffer = (RingBuffer *) malloc(sizeof(RingBuffer));
 	SwrContext *swr; // the resampling context for outputting with standard format in data_buffer
-	Player* player;
+	Player* player=NULL;
 	pthread_mutex_t data_writable_mutex;
 	// Condition for write availability in the data buffer not to do busy wait
 	// in the dump_queue method
 	pthread_cond_t data_writable_cond;
 	// Condition for write availability in the data buffer not to do busy wait
 	// in the dump_queue method
-	SpectrumManager* spmanager;
+	SpectrumManager* spmanager=NULL;
 private:
 	AVFormatContext *pFormatCtx = NULL;
 	AVCodecContext *pCodecCtx = NULL; // the audio codec
 	
 	PacketQueue audioq;
-	bool with_playback=true;
+	bool with_playback=false;
 	// IO formats of the conversion held in a structure, a bit redondant but more elegant
 	ConversionFormat conversion_out_format;
 	ConversionFormat conversion_in_format;

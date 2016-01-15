@@ -202,9 +202,6 @@ static int video_thread(void *arg) {
 	int flen=FFT_SIZE*ratio;
 	int i;
 	pulled_data=(int16_t *) malloc(flen);
-	for(i=0;i<FFT_SIZE;i++){
-		pl->fft_in[1][i]=0.;	
-	}
 	printf("Entering video thread loop... \n");
 	if(!(pl->data_source)){
 		printf("null\n");
@@ -319,10 +316,6 @@ Player::Player(RingBuffer* b){
     }
 
   	data_queue_init(FFT_SIZE/2, DATA_QUEUE_SIZE); // divided by 2 we don't want the symetric part
-  	fft_in=fftw_alloc_complex(FFT_SIZE);
-	fft_out=fftw_alloc_complex(FFT_SIZE);
-	trans=fftw_plan_dft_1d(FFT_SIZE,fft_in,fft_out,FFTW_FORWARD,FFTW_MEASURE);
-
 	pthread_mutex_init(quit_mutex, NULL);
   	pthread_cond_init (quit_cond, NULL);
 
@@ -330,9 +323,6 @@ Player::Player(RingBuffer* b){
 
 
 Player::~Player(){
-	fftw_free(fft_in);
-	fftw_free(fft_out);
-	fftw_destroy_plan(trans);
 	pthread_mutex_destroy(quit_mutex);
 	pthread_cond_destroy(quit_cond);
 }

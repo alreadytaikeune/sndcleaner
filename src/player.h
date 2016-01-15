@@ -63,8 +63,6 @@ public:
   	SDL_Renderer*	renderer = NULL;
   	SDL_mutex*      screen_mutex;
   	SDL_Thread 		*video_tid;
-  	fftw_plan 		trans;
-	fftw_complex 	*fft_in,*fft_out;
 	pthread_mutex_t *data_mutex;
 	pthread_cond_t 	*data_available_cond;
 	bool			no_more_data=false;

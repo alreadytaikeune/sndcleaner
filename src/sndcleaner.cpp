@@ -154,7 +154,7 @@ SndCleaner::SndCleaner(){
 	conversion_out_format.channel_layout = AV_CH_LAYOUT_MONO;
 	swr = swr_alloc();
 	std::cerr << "trying to create ring buffer" << std::endl;
-	int nb_readers = with_playback ? 2 : 0;
+	int nb_readers = with_playback ? 2 : 1;
 	int s = rb_create(data_buffer, DATA_BUFFER_SIZE, nb_readers);
 	if(s < 0){
 		std::cerr << "Error creating ring buffer" << std::endl;
@@ -181,11 +181,14 @@ SndCleaner::SndCleaner(){
 }
 
 SndCleaner::~SndCleaner(){
-	free(data_buffer);
+	std::cout << "destructor called sndcleaner" << std::endl;
+	rb_free(data_buffer);
 	delete player;
 	delete spmanager;
 	pthread_mutex_destroy(&data_writable_mutex);
 	pthread_cond_destroy(&data_writable_cond);
+	avformat_free_context(pFormatCtx);
+	avcodec_free_context(&pCodecCtx);
 }
 
 
@@ -260,9 +263,9 @@ void SndCleaner::open_stream(char * filename){
 	conversion_in_format.sample_rate = pCodecCtx->sample_rate;
 	conversion_in_format.channel_layout = pCodecCtx->channel_layout;
 
-	std::cout << conversion_in_format.sample_fmt << std::endl;
-	std::cout << conversion_in_format.sample_rate << std::endl;
-	std::cout << conversion_in_format.channel_layout << std::endl;
+	// std::cout << conversion_in_format.sample_fmt << std::endl;
+	// std::cout << conversion_in_format.sample_rate << std::endl;
+	// std::cout << conversion_in_format.channel_layout << std::endl;
 
 
 	av_opt_set_int(swr, "in_channel_layout",  conversion_in_format.channel_layout, 0);
@@ -338,6 +341,7 @@ void* SndCleaner::read_frames(){
 * Decodes and dumps the packet queue in a stream buffer
 */
 int SndCleaner::dump_queue(size_t len) {
+  //std::cout << "dumping queue" << std::endl;
   int len1, audio_size;
   static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
   static unsigned int audio_buf_size = 0;
@@ -379,6 +383,7 @@ int SndCleaner::dump_queue(size_t len) {
     audio_buf_index += nb_written;
   }
   //print_array((int16_t *)first_stream, 0, first_len/2);
+  //std::cout << "dumped" << std::endl;
   return first_len - len;
 }
 
@@ -411,7 +416,7 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
       audio_pkt_size -= len1;
       data_size = 0;
       nb_written = 0;
-      if(got_frame) {
+      if(got_frame){
 	    data_size = av_samples_get_buffer_size(frame.linesize, 
 					       pCodecCtx->channels,
 					       frame.nb_samples,
@@ -435,11 +440,11 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
       return nb_written*bytes_per_sample; 
     }
     if(pkt.data)
-      av_free_packet(&pkt);
+    	av_free_packet(&pkt);
 
 
     if(packet_queue_get(&audioq, &pkt) == 0) {
-      return -1;
+    	return -1;
     }
     audio_pkt_data = pkt.data;
     audio_pkt_size = pkt.size;
@@ -459,6 +464,16 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
 
 // }
 
+bool SndCleaner::get_player_quit(){
+	if(!with_playback)
+		return false;
+	else if(!player)
+		return false;
+	else
+		return player->quit;
+}
+
+
 
 void* sc_read_frames(void* thread_arg){
 	std::cout << "starting to read frames" << std::endl;
@@ -466,6 +481,10 @@ void* sc_read_frames(void* thread_arg){
 	sc->read_frames();
 }
 
+
+/*
+*	Continually dump frames until no more available, or quit event from the player
+*/
 void* sc_dump_frames(void* thread_arg){
 	std::cout << "starting to dump frames" << std::endl;
 	pthread_dump_arg* arg = (pthread_dump_arg*) thread_arg;
@@ -474,6 +493,7 @@ void* sc_dump_frames(void* thread_arg){
     int l=0;
     int i=0;
     do{
+    	//std::cout << "writing data to ringbuffer..." << std::endl;
     	if(rb_get_write_space(sc->data_buffer) < 3*len){
     		//std::cout << "not enough write space: " << rb_get_write_space(sc->data_buffer) << std::endl;
     		pthread_mutex_lock(&sc->data_writable_mutex);
@@ -485,23 +505,34 @@ void* sc_dump_frames(void* thread_arg){
     	
     	sc->fill_packet_queue();
     	l = sc->dump_queue(len);
-    }while((!sc->reached_end() | l>0) && !sc->player->quit);
+    	//std::cout << "done." << std::endl;
+    }while((!sc->reached_end() | l>0) && !sc->get_player_quit());
     buffer_full=true;
-    sc->player->no_more_data=true;
+   
+    if(sc->supports_playback()){
+    	sc->player->no_more_data=true;
+    	pthread_mutex_t* quit_mutex=NULL;
+		// Condition for write availability in the data buffer not to do busy wait
+		// in the dump_queue method
+		pthread_cond_t* quit_cond=NULL;
 
-    pthread_mutex_t* quit_mutex=NULL;
-	// Condition for write availability in the data buffer not to do busy wait
-	// in the dump_queue method
-	pthread_cond_t* quit_cond=NULL;
+		sc->player->register_for_quit_callback(quit_mutex, quit_cond);
+	    pthread_mutex_lock(quit_mutex);
 
-	sc->player->register_for_quit_callback(quit_mutex, quit_cond);
-    pthread_mutex_lock(quit_mutex);
-
-    while(rb_get_max_read_space(sc->data_buffer)>0 && !sc->player->quit){
-    	//print_buffer_stats(sc->data_buffer);
-		pthread_cond_wait(quit_cond, quit_mutex);
+	    while(rb_get_max_read_space(sc->data_buffer)>0 && !sc->get_player_quit()){
+	    	//print_buffer_stats(sc->data_buffer);
+			pthread_cond_wait(quit_cond, quit_mutex);
+	    }
+	    pthread_mutex_unlock(quit_mutex);
     }
-    pthread_mutex_unlock(quit_mutex);
+    else{
+    	std::cout << "waiting end of read" << std::endl;
+    	// while(rb_get_max_read_space(sc->data_buffer)>0){
+    	// 	// Should do better an implement a kind of worker thread waiter capability
+    	// }
+    }
+
+    
     //sc->player->quit_all();
     swr_free(&(sc->swr));
 }
@@ -513,6 +544,17 @@ bool SndCleaner::reached_end(){
 	bool b = no_more_packets && is_empty(&audioq);
 	//std::cout << "reached end " << b << std::endl;
 	return b;
+}
+
+void SndCleaner::start_playback(){
+	if(with_playback)
+		player->start_playback();
+}
+
+bool SndCleaner::supports_playback(){
+	if(!with_playback)
+		return false;
+	return (player!=NULL);
 }
 
 void plotData(int16_t* data, int len, int nsize){
@@ -565,6 +607,55 @@ void plotData(int16_t* data, int len, int nsize){
 
 
 
+void SndCleaner::compute_spectrogram(){
+	Spectrogram* s = new Spectrogram(1024);
+	std::cout << "allocated spectrogram at " << s << std::endl;
+	spmanager->register_spectrogram(s, OPEN_MODE_NORMAL);
+	s->initialize_for_rendering();
+	int len,lread=0;
+	int flen=2048*sizeof(int16_t);
+	int16_t* pulled_data = (int16_t *) malloc(flen);
+	double* spectrum;
+	std::cout << "starting to compute spectrogram" << std::endl;
+	int k=0;
+	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end()) && k < 1000){
+		//k++;
+		// print_buffer_stats(data_buffer);
+		spectrum=(double*) malloc(sizeof(double)*2048/2);
+		if(!spectrum)
+			exit(1);
+		// std::cout << "spectrum allocated " << sizeof(double)*2048/2 << " bytes at address " << spectrum << std::endl;
+		pthread_mutex_lock(&data_writable_mutex);
+		// Open mode normal, only pointer is copied in the spectrogram
+		// it is freed in the destructor, normally no memory leak
+		len=flen;
+		lread=0;
+		while(len>0){
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
+			len-=lread;
+			if(lread==0 && reached_end()){
+				std::cout << "no more data" << std::endl;
+				break;
+			}
+
+		}
+		pthread_cond_signal(&data_writable_cond);
+		pthread_mutex_unlock(&data_writable_mutex); // Very important for the matching pthread_cond_wait() routine to complete
+		
+		spmanager->compute_spectrum(pulled_data, spectrum);
+	}
+	
+	s->plot();
+	s->dump_in_bmp("spectrogram");
+	delete s;
+	free(pulled_data);
+	std::cout << "finished to compute spectrogram" << std::endl;
+}
+
+
+
+
+
 int main(int argc, char *argv[]) {
 	if(argc < 2) {
     	std::cerr << "Usage: sndcleaner <file>\n" << std::endl;
@@ -593,7 +684,8 @@ int main(int argc, char *argv[]) {
                    NULL,
                    sc_dump_frames,
                    (void *) &dump_args);
-	cleaner.player->start_playback();
+	//cleaner.player->start_playback();
+	cleaner.compute_spectrogram();
 	pthread_join(dump_thread, NULL);
 	std::cout << "dump thread joined" << std::endl;
 	return 0;
