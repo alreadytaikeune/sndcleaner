@@ -41,6 +41,24 @@ void Spectrogram::set_fft_size(int size){
 }
 
 
+
+void Spectrogram::get_plot_dimensions(int w, int h, int* x_step, int* y_step, int* rect_w, int* rect_h){
+	*x_step = current_frame/w;
+	if(*x_step==0)
+		*x_step=1;
+	*rect_w=w/current_frame;
+	if(*rect_w==0)
+		*rect_w=1;
+
+	*y_step=fft_size/h;
+	if(*y_step==0)
+		*y_step=1;
+	*rect_h=h/fft_size;
+	if(*rect_h==0)
+		*rect_h=1;
+}
+
+
 void Spectrogram::plot(){
 	int w, h;
 	int x_step, y_step;
@@ -94,6 +112,42 @@ void Spectrogram::plot(){
 	SDL_Delay(5000);
 
 }
+
+
+void Spectrogram::plot_binarized_spectrogram(uint8_t** bin){
+	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+	// Clear window
+    SDL_RenderClear(renderer);
+
+    int w, h;
+	int x_step, y_step;
+	int rect_w, rect_h;
+	int i,j;
+	SDL_Rect r;
+
+	SDL_GetWindowSize(window, &w, &h);
+	if(current_frame==0)
+		return;
+
+	get_plot_dimensions(w, h, &x_step, &y_step, &rect_w, &rect_h);
+	r.w=rect_w;
+	r.h=rect_h;
+	int grey=0;
+	for(i=0; i < current_frame; i+=x_step){
+		r.x=i*rect_w;
+		for(j=0; j < fft_size; j+=y_step){
+			r.y=j*rect_h;
+			grey = bin[i][j]*255;
+			SDL_SetRenderDrawColor(renderer, grey, 0, 255-grey, 255);
+			SDL_RenderFillRect(renderer, &r);
+		}
+	}
+	SDL_RenderPresent(renderer);
+	SDL_Delay(5000);
+
+
+}
+
 
 
 int Spectrogram::initialize_for_rendering(){
@@ -158,3 +212,12 @@ void Spectrogram::dump_in_bmp(const char* filename){
 	SDL_SaveBMP(sshot, "screenshot.bmp");
 	SDL_FreeSurface(sshot);
 }
+
+int Spectrogram::get_current_frame(){
+	return current_frame;
+}
+
+double** Spectrogram::get_data(){
+	return data;
+}
+

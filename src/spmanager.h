@@ -37,7 +37,7 @@ private:
 	int 			pipeline_plan=APPLY_WINDOW | TAKE_HALF_SPEC | OPEN_NO_SPEC;
 	fftw_plan 		trans;
 	fftw_complex 	*fft_in,*fft_out;
-	int 			fft_size;
+	int 			fft_size=0;
 	int 			window_type=WINDOW_RECT;
 	Spectrogram*	spectrogram=NULL;
 

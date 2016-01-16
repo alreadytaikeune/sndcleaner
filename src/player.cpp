@@ -316,15 +316,15 @@ Player::Player(RingBuffer* b){
     }
 
   	data_queue_init(FFT_SIZE/2, DATA_QUEUE_SIZE); // divided by 2 we don't want the symetric part
-	pthread_mutex_init(quit_mutex, NULL);
-  	pthread_cond_init (quit_cond, NULL);
+	pthread_mutex_init(&quit_mutex, NULL);
+  	pthread_cond_init (&quit_cond, NULL);
 
 }
 
 
 Player::~Player(){
-	pthread_mutex_destroy(quit_mutex);
-	pthread_cond_destroy(quit_cond);
+	pthread_mutex_destroy(&quit_mutex);
+	pthread_cond_destroy(&quit_cond);
 }
 
 
@@ -365,10 +365,14 @@ void Player::_quit_all(){
 	queue_flush(&dataq);
 	SDL_WaitThread(video_tid, &status);
 	printf("joined with status %d\n", status);
-	pthread_mutex_lock(quit_mutex);
-	pthread_cond_signal(quit_cond);
-	pthread_mutex_unlock(quit_mutex);
+	pthread_mutex_lock(&quit_mutex);
+	pthread_cond_signal(&quit_cond);
+	pthread_mutex_unlock(&quit_mutex);
+	pthread_mutex_lock(data_mutex);
+	pthread_cond_signal(data_available_cond);
+	pthread_mutex_unlock(data_mutex);
 	SDL_Quit();
+	std::cout << "quit all ok" << std::endl;
 }
 
 
@@ -384,7 +388,8 @@ void Player::start_playback(){
     	switch(event.type) {
     	case FF_QUIT_EVENT:
     	case SDL_QUIT:
-      		
+    		std::cout << "quit event received" << std::endl;
+      		_quit_all();
       		return;
       		break;
     	case FF_REFRESH_EVENT:
@@ -437,6 +442,6 @@ void Player::set_spectrum_manager(SpectrumManager* sm){
 }
 
 void Player::register_for_quit_callback(pthread_mutex_t* mut, pthread_cond_t* cond){
-	mut=quit_mutex;
-	cond=quit_cond;
+	mut=&quit_mutex;
+	cond=&quit_cond;
 }

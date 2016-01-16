@@ -32,16 +32,20 @@ void SpectrumManager::set_window(int w){
 }
 
 void SpectrumManager::set_fft_size(int s){
-	fft_size=s;
-	fftw_free(fft_in);
-	fftw_free(fft_out);
-	fftw_destroy_plan(trans);
-	fft_in=fftw_alloc_complex(fft_size);
-	fft_out=fftw_alloc_complex(fft_size);
-	trans=fftw_plan_dft_1d(fft_size,fft_in,fft_out,FFTW_FORWARD,FFTW_MEASURE);
-	for(int i=0;i<fft_size;i++){
-		fft_in[1][i]=0.;	
+	if(s!=fft_size){
+		std::cout << "setting new fft size " << s << " vs " << fft_size << std::endl;
+		fft_size=s;
+		fftw_free(fft_in);
+		fftw_free(fft_out);
+		fftw_destroy_plan(trans);
+		fft_in=fftw_alloc_complex(fft_size);
+		fft_out=fftw_alloc_complex(fft_size);
+		trans=fftw_plan_dft_1d(fft_size,fft_in,fft_out,FFTW_FORWARD,FFTW_MEASURE);
+		for(int i=0;i<fft_size;i++){
+			fft_in[1][i]=0.;	
+		}
 	}
+	
 }
 
 

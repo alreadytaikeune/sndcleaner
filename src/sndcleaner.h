@@ -81,7 +81,7 @@ private:
 	AVCodecContext *pCodecCtx = NULL; // the audio codec
 	
 	PacketQueue audioq;
-	bool with_playback=false;
+	bool with_playback=true;
 	// IO formats of the conversion held in a structure, a bit redondant but more elegant
 	ConversionFormat conversion_out_format;
 	ConversionFormat conversion_in_format;

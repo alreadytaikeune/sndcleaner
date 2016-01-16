@@ -67,8 +67,8 @@ public:
 	pthread_cond_t 	*data_available_cond;
 	bool			no_more_data=false;
 	SpectrumManager	*spmanager;
-	pthread_mutex_t*quit_mutex;
-	pthread_cond_t* quit_cond;
+	pthread_mutex_t quit_mutex;
+	pthread_cond_t  quit_cond;
 private:
 	void _quit_all();
 };

@@ -14,8 +14,12 @@ public:
 	int initialize_for_rendering();
 	SDL_Window* get_window();
 	void plot();
+	void plot_binarized_spectrogram(uint8_t** bin);
 	void dump_in_bmp(const char*);
 	void set_fft_size(int size);
+	int get_current_frame();
+	double** get_data();
+	void get_plot_dimensions(int w, int h, int* x_step, int* y_step, int* rect_w, int* rect_h);
 protected:
 	int temp_frames_nb=SPECTROGRAM_BASE_SIZE;
 	int current_frame=0;

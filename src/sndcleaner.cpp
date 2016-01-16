@@ -3,7 +3,7 @@
 #include "sndcleaner.h"
 #include <assert.h>
 #include "utils.h"
-
+#include "processor.h"
 
 // compatibility with newer API
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(55,28,1)
@@ -493,37 +493,43 @@ void* sc_dump_frames(void* thread_arg){
     int l=0;
     int i=0;
     do{
-    	//std::cout << "writing data to ringbuffer..." << std::endl;
+    	// std::cout << "writing data to ringbuffer..." << std::endl;
     	if(rb_get_write_space(sc->data_buffer) < 3*len){
-    		//std::cout << "not enough write space: " << rb_get_write_space(sc->data_buffer) << std::endl;
+    		// std::cout << "not enough write space: " << rb_get_write_space(sc->data_buffer) << std::endl;
     		pthread_mutex_lock(&sc->data_writable_mutex);
     		while (rb_get_write_space(sc->data_buffer) < len){
     			pthread_cond_wait(&sc->data_writable_cond, &sc->data_writable_mutex);
+    			if(sc->get_player_quit())
+    				break;
     		}
     		pthread_mutex_unlock(&sc->data_writable_mutex);
     	}
-    	
+
+    	if(sc->get_player_quit())
+    		break;
     	sc->fill_packet_queue();
     	l = sc->dump_queue(len);
     	//std::cout << "done." << std::endl;
     }while((!sc->reached_end() | l>0) && !sc->get_player_quit());
-    buffer_full=true;
    
     if(sc->supports_playback()){
+    	std::cout << "support playback true" << std::endl;
     	sc->player->no_more_data=true;
-    	pthread_mutex_t* quit_mutex=NULL;
+    	pthread_mutex_t quit_mutex;
 		// Condition for write availability in the data buffer not to do busy wait
 		// in the dump_queue method
-		pthread_cond_t* quit_cond=NULL;
+		pthread_cond_t quit_cond;
 
-		sc->player->register_for_quit_callback(quit_mutex, quit_cond);
-	    pthread_mutex_lock(quit_mutex);
-
+		sc->player->register_for_quit_callback(&quit_mutex, &quit_cond);
+		std::cout << "trying to lock quit mutex" << std::endl;
+	    pthread_mutex_lock(&quit_mutex);
+		std::cout << "locked" << std::endl;
 	    while(rb_get_max_read_space(sc->data_buffer)>0 && !sc->get_player_quit()){
 	    	//print_buffer_stats(sc->data_buffer);
-			pthread_cond_wait(quit_cond, quit_mutex);
+	    	std::cout << "waiting quit signal" << std::endl;
+			pthread_cond_wait(&quit_cond, &quit_mutex);
 	    }
-	    pthread_mutex_unlock(quit_mutex);
+	    pthread_mutex_unlock(&quit_mutex);
     }
     else{
     	std::cout << "waiting end of read" << std::endl;
@@ -547,7 +553,7 @@ bool SndCleaner::reached_end(){
 }
 
 void SndCleaner::start_playback(){
-	if(with_playback)
+	if(supports_playback())
 		player->start_playback();
 }
 
@@ -644,11 +650,24 @@ void SndCleaner::compute_spectrogram(){
 		
 		spmanager->compute_spectrum(pulled_data, spectrum);
 	}
-	
-	s->plot();
+	int c = s->get_current_frame();
+	uint8_t** bin = (uint8_t**) malloc(sizeof(uint8_t *)*c);
+	for(int k=0; k<c; k++){
+		bin[k] = (uint8_t*) malloc(sizeof(uint8_t)*1024);
+		memset(bin[k], 0, sizeof(uint8_t)*1024);
+	}
+	Mask* m = alloc_mask(M1);
+	apply_mask(s->get_data(), bin, c, 1024, m, CROPPED);
+	//s->plot();
+	s->plot_binarized_spectrogram(bin);
 	s->dump_in_bmp("spectrogram");
 	delete s;
 	free(pulled_data);
+	free_msk(m);
+	for(int k=0; k<c; k++){
+		free(bin[k]);
+	}
+	free(bin);
 	std::cout << "finished to compute spectrogram" << std::endl;
 }
 
@@ -684,8 +703,8 @@ int main(int argc, char *argv[]) {
                    NULL,
                    sc_dump_frames,
                    (void *) &dump_args);
-	//cleaner.player->start_playback();
-	cleaner.compute_spectrogram();
+	cleaner.player->start_playback();
+	//cleaner.compute_spectrogram();
 	pthread_join(dump_thread, NULL);
 	std::cout << "dump thread joined" << std::endl;
 	return 0;
