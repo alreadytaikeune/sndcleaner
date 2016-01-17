@@ -9,9 +9,11 @@ void bit_error_ratio();
 void kl_divergence();
 void bayesian_information_score();
 
-void to_mel_scale();
+void to_mel_scale(double* data, double* out, int fft_size, int mel_nb, double freq_max);
 
 void compression_level();
+
+void print_mel_filterbank(int fft_size, int mel_nb, double freq_max);
 
 /*
 *	Mutli-threadable version of mask application without SIMD optimization

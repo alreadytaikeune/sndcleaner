@@ -1,5 +1,6 @@
 #include "spmanager.h"
 #include <iostream>
+#include "processor.h"
 
 SpectrumManager::SpectrumManager(){
 	fft_size=0;
@@ -64,6 +65,13 @@ void SpectrumManager::compute_spectrum(int16_t* in, double* out){
 	fftw_execute(trans);
 	
 	int idx_max = GET_TAKE_HALF(pipeline_plan) ? fft_size/2 : fft_size;
+	double* tmp;
+	if(OPT_FLAG_ISSET(pipeline_plan, APPLY_MEL_RESCALING)){
+		tmp = (double*) malloc(sizeof(double)*fft_size);
+	}
+	else{
+		tmp=out;
+	}
 	for(i=0;i<idx_max;i++){
 		out[i]=sqrt(pow(fft_out[i][0],2)+pow(fft_out[i][1],2));
 	}
@@ -74,8 +82,13 @@ void SpectrumManager::compute_spectrum(int16_t* in, double* out){
 			std::cerr << "no spectrogram set" << std::endl;
 			return;
 		}
-		// std::cout << "addind spec in spectrogram at " << spectrogram << std::endl;
+		if(OPT_FLAG_ISSET(pipeline_plan, APPLY_MEL_RESCALING)){
+			double* mel = (double*) malloc(sizeof(double)*MEL_SIZE);
+			to_mel_scale(tmp, out, idx_max, MEL_SIZE, sampling/2);
+			free(tmp);
+		}
 		spectrogram->add_spectrum(out);
+
 	}
 	else if(GET_OPEN_MODE(pipeline_plan) == OPEN_MODE_COPY){
 		if(!spectrogram){
@@ -91,10 +104,15 @@ int SpectrumManager::register_spectrogram(Spectrogram* s, int open_mode){
 	if(set_open_mode(open_mode)<0)
 		return -1;
 	spectrogram=s;
+	if(OPT_FLAG_ISSET(pipeline_plan, APPLY_MEL_RESCALING)){
+		spectrogram->set_fft_size(MEL_SIZE);
+		return 0;
+	}
 	if(GET_TAKE_HALF(pipeline_plan))
-		spectrogram->set_fft_size(fft_size/2);
+		spectrogram->set_fft_size(fft_size/2);		
 	else
 		spectrogram->set_fft_size(fft_size);
+	return 0;
 }
 
 int SpectrumManager::set_open_mode(int open_mode){
@@ -108,4 +126,8 @@ int SpectrumManager::set_open_mode(int open_mode){
 	std::cout << "pipeline plan is " << pipeline_plan << std::endl;
 	std::cout << "open mode is " << GET_OPEN_MODE(pipeline_plan) << std::endl;
 	return 0;	 
+}
+
+void SpectrumManager::set_pipeline(int pipeline){
+	pipeline_plan=pipeline;
 }

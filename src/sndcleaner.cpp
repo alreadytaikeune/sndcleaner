@@ -4,6 +4,8 @@
 #include <assert.h>
 #include "utils.h"
 #include "processor.h"
+#include <boost/program_options.hpp>
+namespace po = boost::program_options;
 
 // compatibility with newer API
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(55,28,1)
@@ -25,6 +27,18 @@ enum Endianness {BIG, LITTLE, UNDEDFINED};
 
 Endianness endianness = UNDEDFINED;
 
+
+
+/*
+*	TODO:
+		- Add arg checking
+
+*
+*/
+
+
+
+
 typedef struct pthread_dump_arg{
 	int len;
 	SndCleaner* sc;
@@ -43,6 +57,16 @@ template<typename T> void print_array(T* arr, int offset, int len){
 	std::cout << std::endl;
 }
 
+
+void print_options(ProgramOptions* op){
+	std::cout << op->fft_size << std::endl;
+	std::cout << op->with_playback << std::endl;
+	std::cout << op->filename << std::endl;
+	std::cout << op->take_half << std::endl;
+	std::cout << op->apply_window << std::endl;
+	std::cout << op->window << std::endl;
+	std::cout << op->mel << std::endl;
+}
 
 
 //	PacketQueue related methods
@@ -146,7 +170,12 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt) {
 ////////////////////////////////////////////////////////////////////////////
 
 
-SndCleaner::SndCleaner(){
+SndCleaner::SndCleaner(ProgramOptions* op){
+	if(!op)
+		options = (ProgramOptions*) malloc(sizeof(ProgramOptions));
+	else
+		options = op;
+	print_options(options);
 	packet_queue_init(&audioq, PACKET_QUEUE_MAX_NB);
 	audioStreamId=-1;
 	conversion_out_format.sample_fmt = AV_SAMPLE_FMT_S16;
@@ -154,7 +183,7 @@ SndCleaner::SndCleaner(){
 	conversion_out_format.channel_layout = AV_CH_LAYOUT_MONO;
 	swr = swr_alloc();
 	std::cerr << "trying to create ring buffer" << std::endl;
-	int nb_readers = with_playback ? 2 : 1;
+	int nb_readers = options->with_playback ? 2 : 1;
 	int s = rb_create(data_buffer, DATA_BUFFER_SIZE, nb_readers);
 	if(s < 0){
 		std::cerr << "Error creating ring buffer" << std::endl;
@@ -164,9 +193,29 @@ SndCleaner::SndCleaner(){
   	pthread_mutex_init(&data_writable_mutex, NULL);
   	pthread_cond_init (&data_writable_cond, NULL);
 
-  	spmanager=new SpectrumManager(2048, WINDOW_BLACKMAN);
+  	int pipeline=0;
 
-	if(with_playback){
+  	if(op->apply_window){
+  		spmanager=new SpectrumManager(2048, op->window);
+  		pipeline |= APPLY_WINDOW; 
+  	}
+  	else{
+  		spmanager=new SpectrumManager(2048);
+  	}
+
+  	if(op->take_half){
+  		pipeline |= TAKE_HALF_SPEC; 
+  	}
+
+	if(op->mel>0){
+		pipeline |= APPLY_MEL_RESCALING;
+	}
+
+  	spmanager->set_pipeline(pipeline);
+  		
+  	
+
+	if(options->with_playback){
 		player = new Player(data_buffer);
 		player->set_stream_reader_idx(0);
 		player->set_fft_reader_idx(1);
@@ -180,6 +229,8 @@ SndCleaner::SndCleaner(){
 	std::cerr << "ok" << std::endl;
 }
 
+
+
 SndCleaner::~SndCleaner(){
 	std::cout << "destructor called sndcleaner" << std::endl;
 	rb_free(data_buffer);
@@ -192,9 +243,9 @@ SndCleaner::~SndCleaner(){
 }
 
 
-void SndCleaner::open_stream(char * filename){
-	std::cout << "retrieving " << filename << std::endl;
-
+void SndCleaner::open_stream(){
+	av_register_all();
+	char* filename = (char*) options->filename.c_str();
 	// Open video file
 	if(avformat_open_input(&pFormatCtx, filename, NULL, NULL)!=0){
 		std::cerr << "Error opening input" << std::endl;
@@ -465,7 +516,7 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
 // }
 
 bool SndCleaner::get_player_quit(){
-	if(!with_playback)
+	if(!options->with_playback)
 		return false;
 	else if(!player)
 		return false;
@@ -558,7 +609,7 @@ void SndCleaner::start_playback(){
 }
 
 bool SndCleaner::supports_playback(){
-	if(!with_playback)
+	if(!options->with_playback)
 		return false;
 	return (player!=NULL);
 }
@@ -614,9 +665,12 @@ void plotData(int16_t* data, int len, int nsize){
 
 
 void SndCleaner::compute_spectrogram(){
-	Spectrogram* s = new Spectrogram(1024);
+	Spectrogram* s = new Spectrogram(2048);
 	std::cout << "allocated spectrogram at " << s << std::endl;
-	spmanager->register_spectrogram(s, OPEN_MODE_NORMAL);
+	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
+		std::cerr << "impossible to register spectrogram" << std::endl;
+		exit(EXIT_FAILURE);
+	}
 	s->initialize_for_rendering();
 	int len,lread=0;
 	int flen=2048*sizeof(int16_t);
@@ -624,10 +678,11 @@ void SndCleaner::compute_spectrogram(){
 	double* spectrum;
 	std::cout << "starting to compute spectrogram" << std::endl;
 	int k=0;
+	//spectrum=(double*) malloc(sizeof(double)*2048/2);
 	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end()) && k < 1000){
 		//k++;
 		// print_buffer_stats(data_buffer);
-		spectrum=(double*) malloc(sizeof(double)*2048/2);
+		spectrum=(double*) malloc(sizeof(double)*2048);
 		if(!spectrum)
 			exit(1);
 		// std::cout << "spectrum allocated " << sizeof(double)*2048/2 << " bytes at address " << spectrum << std::endl;
@@ -657,9 +712,10 @@ void SndCleaner::compute_spectrogram(){
 		memset(bin[k], 0, sizeof(uint8_t)*1024);
 	}
 	Mask* m = alloc_mask(M1);
-	apply_mask(s->get_data(), bin, c, 1024, m, CROPPED);
-	//s->plot();
-	s->plot_binarized_spectrogram(bin);
+	//apply_mask(s->get_data(), bin, c, 26, m, CROPPED);
+	s->plot();
+	//print_mel_filterbank(1024, 26, 22050.);
+	//s->plot_binarized_spectrogram(bin);
 	s->dump_in_bmp("spectrogram");
 	delete s;
 	free(pulled_data);
@@ -668,22 +724,47 @@ void SndCleaner::compute_spectrogram(){
 		free(bin[k]);
 	}
 	free(bin);
+	//free(spectrum);
 	std::cout << "finished to compute spectrogram" << std::endl;
 }
 
 
-
-
-
 int main(int argc, char *argv[]) {
-	if(argc < 2) {
-    	std::cerr << "Usage: sndcleaner <file>\n" << std::endl;
-    	exit(1);
-  	}
-	check_endianness();
-	av_register_all();
-	SndCleaner cleaner; 
-	cleaner.open_stream(argv[1]);
+	ProgramOptions poptions;
+
+  	po::options_description desc("Allowed options");
+    desc.add_options()
+        ("help", "produce help message")
+        ("with-playback", po::bool_switch(&poptions.with_playback)->default_value(false), "Should play back the input stream")
+        ("size,s", po::value(&poptions.fft_size)->default_value(2048), "The size of the spectrum")
+    	("input,i", po::value(&poptions.filename), "the name of the input file")
+    	("take-half", po::bool_switch(&poptions.take_half), "should we drop half of the spectrum")
+    	("apply-window,w", po::bool_switch(&poptions.apply_window), "should an windowing function be applied")
+    	("window-type", po::value(&poptions.window), "the windowing function to apply.\n\t1: rectangular\n\t2: blackmann\n\t4: hanning\n\t8: hamming")
+     	("mel", po::value(&poptions.mel), "If set, the spectrum will be converted to mel scale with the specified number of windows")
+  
+    ;
+
+	po::positional_options_description p;
+	p.add("input", -1);
+
+	po::variables_map vm;
+	po::store(po::command_line_parser(argc, argv).
+	          options(desc).positional(p).run(), vm);
+	po::notify(vm);
+
+	if(vm.count("help")) {
+		std::cout << desc << "\n";
+		return 0;
+    }
+    if(!vm.count("input")) {
+    	std::cout << "YOU MUST SPECIFY AN INPUT FILE" << "\n";
+		std::cout << desc << "\n";
+		return 0;
+    }
+
+	SndCleaner cleaner(&poptions); 
+	cleaner.open_stream();
 
 	pthread_t read_thread;
 	pthread_t dump_thread;
@@ -703,8 +784,8 @@ int main(int argc, char *argv[]) {
                    NULL,
                    sc_dump_frames,
                    (void *) &dump_args);
-	cleaner.player->start_playback();
-	//cleaner.compute_spectrogram();
+	//cleaner.player->start_playback();
+	cleaner.compute_spectrogram();
 	pthread_join(dump_thread, NULL);
 	std::cout << "dump thread joined" << std::endl;
 	return 0;

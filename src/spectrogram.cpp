@@ -40,8 +40,6 @@ void Spectrogram::set_fft_size(int size){
 	fft_size = size;
 }
 
-
-
 void Spectrogram::get_plot_dimensions(int w, int h, int* x_step, int* y_step, int* rect_w, int* rect_h){
 	*x_step = current_frame/w;
 	if(*x_step==0)
@@ -98,9 +96,9 @@ void Spectrogram::plot(){
     SDL_RenderClear(renderer);
     int grey=0;
 	for(i=0; i < current_frame; i+=x_step){
-		r.x=i*rect_w;
+		r.x=(i/x_step)*rect_w;
 		for(j=0; j < fft_size; j+=y_step){
-			r.y=j*rect_h;
+			r.y=(j/y_step)*rect_h;
 			grey = (int) ((data[i][j]/80000.)*255);
 			if(grey > 255)
 				grey=255;
@@ -110,7 +108,6 @@ void Spectrogram::plot(){
 	}
 	SDL_RenderPresent(renderer);
 	SDL_Delay(5000);
-
 }
 
 
@@ -144,7 +141,6 @@ void Spectrogram::plot_binarized_spectrogram(uint8_t** bin){
 	}
 	SDL_RenderPresent(renderer);
 	SDL_Delay(5000);
-
 
 }
 

@@ -42,13 +42,23 @@ typedef struct ConversionFormat{
 	int64_t channel_layout;
 } ConversionFormat;
 
+typedef struct ProgramOptions{
+	int fft_size=2048;
+	bool with_playback=false;
+	std::string filename;
+	bool take_half=true;
+	bool apply_window=true;
+	int window=WINDOW_BLACKMAN;
+	int mel=-1;
+
+} ProgramOptions;
 
 
 class SndCleaner{
 public:
-	void open_stream(char * filename);
+	void open_stream();
 	void packet_queue_init(PacketQueue *q, int nb);
-	SndCleaner();
+	SndCleaner(ProgramOptions* op);
 	~SndCleaner();
 	void* read_frames();
 	int fill_packet_queue();
@@ -81,7 +91,6 @@ private:
 	AVCodecContext *pCodecCtx = NULL; // the audio codec
 	
 	PacketQueue audioq;
-	bool with_playback=true;
 	// IO formats of the conversion held in a structure, a bit redondant but more elegant
 	ConversionFormat conversion_out_format;
 	ConversionFormat conversion_in_format;
@@ -89,5 +98,5 @@ private:
 	int stored_samples;
 	bool received_packets=false;
 	bool no_more_packets=false;
-
+	ProgramOptions* options;
 };
