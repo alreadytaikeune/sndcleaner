@@ -6,7 +6,7 @@
 #define RESCALE_FACTOR 1.5
 
 Spectrogram::Spectrogram(int fsize){
-	fft_size=fsize;
+	data_size=fsize;
 	data = (double**) malloc(sizeof(double*)*SPECTROGRAM_BASE_SIZE);
 	for(int i=0; i < temp_frames_nb; i++){
 		data[i]=NULL;
@@ -37,7 +37,7 @@ int Spectrogram::add_spectrum(double* spec){
 }
 
 void Spectrogram::set_fft_size(int size){
-	fft_size = size;
+	data_size = size;
 }
 
 void Spectrogram::get_plot_dimensions(int w, int h, int* x_step, int* y_step, int* rect_w, int* rect_h){
@@ -48,10 +48,10 @@ void Spectrogram::get_plot_dimensions(int w, int h, int* x_step, int* y_step, in
 	if(*rect_w==0)
 		*rect_w=1;
 
-	*y_step=fft_size/h;
+	*y_step=data_size/h;
 	if(*y_step==0)
 		*y_step=1;
-	*rect_h=h/fft_size;
+	*rect_h=h/data_size;
 	if(*rect_h==0)
 		*rect_h=1;
 }
@@ -76,16 +76,16 @@ void Spectrogram::plot(){
 	if(rect_w==0)
 		rect_w=1;
 
-	y_step=fft_size/h;
+	y_step=data_size/h;
 	if(y_step==0)
 		y_step=1;
-	rect_h=h/fft_size;
+	rect_h=h/data_size;
 	if(rect_h==0)
 		rect_h=1;
 	r.w=rect_w;
 	r.h=rect_h;
 	std::cout << "current frame: " << current_frame << std::endl;
-	std::cout << "fft_size: " << fft_size << std::endl;
+	std::cout << "data_size: " << data_size << std::endl;
 	std::cout << "rect_w: " << rect_w << std::endl;
 	std::cout << "rect_h: " << rect_h << std::endl;
 	std::cout << "x_step: " << x_step << std::endl;
@@ -97,9 +97,9 @@ void Spectrogram::plot(){
     int grey=0;
 	for(i=0; i < current_frame; i+=x_step){
 		r.x=(i/x_step)*rect_w;
-		for(j=0; j < fft_size; j+=y_step){
+		for(j=0; j < data_size; j+=y_step){
 			r.y=(j/y_step)*rect_h;
-			grey = (int) ((data[i][j]/80000.)*255);
+			grey = (int) ((data[i][j]/150000.)*255);
 			if(grey > 255)
 				grey=255;
 			SDL_SetRenderDrawColor(renderer, grey, grey, grey, 255);
@@ -132,7 +132,7 @@ void Spectrogram::plot_binarized_spectrogram(uint8_t** bin){
 	int grey=0;
 	for(i=0; i < current_frame; i+=x_step){
 		r.x=i*rect_w;
-		for(j=0; j < fft_size; j+=y_step){
+		for(j=0; j < data_size; j+=y_step){
 			r.y=j*rect_h;
 			grey = bin[i][j]*255;
 			SDL_SetRenderDrawColor(renderer, grey, 0, 255-grey, 255);
@@ -163,7 +163,7 @@ int Spectrogram::initialize_for_rendering(){
 }
 
 int Spectrogram::add_spectrum_with_copy(double* spec){
-	double* new_spec = (double*) malloc(fft_size*sizeof(double));
+	double* new_spec = (double*) malloc(data_size*sizeof(double));
 	if(!new_spec){
 		std::cerr << "unable to allocate memory for spectrum" << std::cout;
 		return -1;
@@ -173,7 +173,7 @@ int Spectrogram::add_spectrum_with_copy(double* spec){
 		if(_realloc() < 0)
 			return -1;
 	}
-	if(!memcpy(new_spec, spec, fft_size*sizeof(double)))
+	if(!memcpy(new_spec, spec, data_size*sizeof(double)))
 		return -1;
 	data[current_frame]=new_spec;
 	current_frame++;
@@ -199,13 +199,13 @@ SDL_Window* Spectrogram::get_window(){
 	return window;
 }
 
-void Spectrogram::dump_in_bmp(const char* filename){
+void Spectrogram::dump_in_bmp(std::string filename){
 
 	int w, h;
 	SDL_GetWindowSize(window, &w, &h);
 	SDL_Surface *sshot = SDL_CreateRGBSurface(0, w, h, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
 	SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, sshot->pixels, sshot->pitch);
-	SDL_SaveBMP(sshot, "screenshot.bmp");
+	SDL_SaveBMP(sshot, (const char *) (filename+".bmp").c_str());
 	SDL_FreeSurface(sshot);
 }
 

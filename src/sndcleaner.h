@@ -71,6 +71,8 @@ public:
 	void start_playback();
 	bool supports_playback();
 	void compute_spectrogram();
+	void compute_mel_spectrogram();
+	int get_mel_size();
 	//void write_stream_to_data_buffer(int len);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 

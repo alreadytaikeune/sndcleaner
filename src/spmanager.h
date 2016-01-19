@@ -63,6 +63,10 @@ public:
 	*/
 	void set_pipeline(int pipeline);
 
+	bool is_mel_flag_set();
+
+	Spectrogram* get_spectrogram();
+
 private:
 	int 			pipeline_plan=APPLY_WINDOW | OPEN_NO_SPEC | TAKE_HALF_SPEC;
 	fftw_plan 		trans;

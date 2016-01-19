@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "processor.h"
 #include <boost/program_options.hpp>
+#include "cleansound.h"
 namespace po = boost::program_options;
 
 // compatibility with newer API
@@ -22,17 +23,13 @@ static int packet_queue_put(PacketQueue *q, AVPacket *pkt);
 
 
 static bool buffer_full = false;
-enum Endianness {BIG, LITTLE, UNDEDFINED};
-
-
-Endianness endianness = UNDEDFINED;
 
 
 
 /*
 *	TODO:
 		- Add arg checking
-
+		- finish the add spectrogram with copy pipeline
 *
 */
 
@@ -44,12 +41,6 @@ typedef struct pthread_dump_arg{
 	SndCleaner* sc;
 } pthread_dump_arg;
 
-void check_endianness(){
-	int i = 1;
-	char* it = (char *) &i;
-	endianness = (*it == 1) ? LITTLE : BIG;
-	std::cout << endianness << std::endl;
-}
 
 template<typename T> void print_array(T* arr, int offset, int len){
 	for(T* it = arr; it <  arr + offset + len; ++it)
@@ -614,6 +605,12 @@ bool SndCleaner::supports_playback(){
 	return (player!=NULL);
 }
 
+
+int SndCleaner::get_mel_size(){
+	return options->mel;
+}
+
+
 void plotData(int16_t* data, int len, int nsize){
 	PLFLT x[nsize];
 	PLFLT y[nsize];
@@ -664,8 +661,9 @@ void plotData(int16_t* data, int len, int nsize){
 
 
 
+
 void SndCleaner::compute_spectrogram(){
-	Spectrogram* s = new Spectrogram(2048);
+	Spectrogram* s = new Spectrogram(options->fft_size); // s is destroyed in the spmanager's destructor
 	std::cout << "allocated spectrogram at " << s << std::endl;
 	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
 		std::cerr << "impossible to register spectrogram" << std::endl;
@@ -673,16 +671,14 @@ void SndCleaner::compute_spectrogram(){
 	}
 	s->initialize_for_rendering();
 	int len,lread=0;
-	int flen=2048*sizeof(int16_t);
+	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
 	double* spectrum;
 	std::cout << "starting to compute spectrogram" << std::endl;
-	int k=0;
 	//spectrum=(double*) malloc(sizeof(double)*2048/2);
-	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end()) && k < 1000){
-		//k++;
+	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
 		// print_buffer_stats(data_buffer);
-		spectrum=(double*) malloc(sizeof(double)*2048);
+		spectrum=(double*) malloc(sizeof(double)*(options->fft_size));
 		if(!spectrum)
 			exit(1);
 		// std::cout << "spectrum allocated " << sizeof(double)*2048/2 << " bytes at address " << spectrum << std::endl;
@@ -705,6 +701,153 @@ void SndCleaner::compute_spectrogram(){
 		
 		spmanager->compute_spectrum(pulled_data, spectrum);
 	}
+
+	free(pulled_data);
+	std::cout << "finished to compute spectrogram" << std::endl;
+}
+
+
+
+void SndCleaner::compute_mel_spectrogram(){
+	if(!spmanager->is_mel_flag_set()){
+		std::cerr << "cannot compute spectrogram is flag mel unset in spmanager" << std::endl;
+		exit(1);
+	}
+	Spectrogram* s = new Spectrogram(options->mel); // s is destroyed in the spmanager's destructor
+	std::cout << "allocated spectrogram at " << s << std::endl;
+	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
+		std::cerr << "impossible to register spectrogram" << std::endl;
+		exit(EXIT_FAILURE);
+	}
+	s->initialize_for_rendering();
+	int len,lread=0;
+	int flen=(options->fft_size)*sizeof(int16_t);
+	int16_t* pulled_data = (int16_t *) malloc(flen);
+	double* spectrum;
+	std::cout << "starting to compute mel spectrogram" << std::endl;
+
+	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
+		spectrum=(double*) calloc(options->mel, sizeof(double)); // must be a calloc and not a malloc, because it is not zeroed out in the mel scale function, so the incrementation goes wrong
+		if(!spectrum)
+			exit(1);
+		// std::cout << "spectrum allocated " << sizeof(double)*2048/2 << " bytes at address " << spectrum << std::endl;
+		pthread_mutex_lock(&data_writable_mutex);
+		// Open mode normal, only pointer is copied in the spectrogram
+		// it is freed in the destructor, normally no memory leak
+		len=flen;
+		lread=0;
+		while(len>0){
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
+			len-=lread;
+			if(lread==0 && reached_end()){
+				std::cout << "no more data" << std::endl;
+				break;
+			}
+
+		}
+		pthread_cond_signal(&data_writable_cond);
+		pthread_mutex_unlock(&data_writable_mutex); // Very important for the matching pthread_cond_wait() routine to complete
+		spmanager->compute_spectrum(pulled_data, spectrum);
+	}
+
+	free(pulled_data);
+	std::cout << "finished to compute spectrogram" << std::endl;
+}
+
+void test_bit_operations(){
+	int i1 = 0b00101010110000110010101011000011;
+	int i2 = 0b01001111010100110100111101010011;
+
+
+	int diff = bit_error((void*) &i1, (void*) &i2, sizeof(int), 32, 1);
+
+	std::cout << diff << std::endl;
+
+	std::cout << bit_error((void*) &i1, (void*) &i2, sizeof(int), 10, 1) << std::endl;
+
+	long li1 = 0b0010101011000011001010101100001100101010110000110010101011000011;
+	long li2 = 0b0100111101010011010011110101001101001111010100110100111101010011;
+
+	int ldiff = bit_error((void*) &li1, (void*) &li2, sizeof(long), 64, 1);
+
+	std::cout << ldiff << std::endl;
+
+	std::cout << bit_error((void*) &li1, (void*) &li2, sizeof(long), 33, 1) << std::endl;
+
+
+	int* ai1 = (int*) malloc(2*sizeof(int));
+	ai1[0]=i1;
+	ai1[1]=i1;
+	int* ai2 = (int*) malloc(2*sizeof(int));
+	ai2[0]=i2;
+	ai2[1]=i2;
+
+	float adiff = bit_error_ratio((void*) ai1, (void*) ai2, sizeof(int), 32, 2);
+
+	std::cout << adiff << std::endl;
+
+
+}
+
+
+void test_playback(SndCleaner* cleaner){
+	cleaner->open_stream();
+
+	pthread_t dump_thread;
+
+	pthread_dump_arg dump_args;
+
+	dump_args.len = STREAM_BUFFER_SIZE;
+	dump_args.sc = cleaner;
+
+	std::cout << "launching threads" << std::endl;
+
+	pthread_create(&dump_thread,
+                   NULL,
+                   sc_dump_frames,
+                   (void *) &dump_args);
+	cleaner->player->start_playback();
+}
+
+
+void test_spectrogram(SndCleaner* cleaner){
+	cleaner->open_stream();
+
+	pthread_t dump_thread;
+
+	pthread_dump_arg dump_args;
+
+	dump_args.len = STREAM_BUFFER_SIZE;
+	dump_args.sc = cleaner;
+
+	std::cout << "launching threads" << std::endl;
+
+	// pthread_create(&read_thread,
+ //                   NULL,
+ //                   sc_read_frames,
+ //                   (void *) &cleaner);
+	pthread_create(&dump_thread,
+                   NULL,
+                   sc_dump_frames,
+                   (void *) &dump_args);
+	//cleaner.player->start_playback();
+	if(cleaner->get_mel_size()>0){
+		cleaner->compute_mel_spectrogram();
+		//cleaner->compute_spectrogram();
+	}
+	else{
+		cleaner->compute_spectrogram();
+	}
+	
+	pthread_join(dump_thread, NULL);
+	std::cout << "dump thread joined" << std::endl;
+	Spectrogram* s = cleaner->spmanager->get_spectrogram();
+	s->plot();
+	s->dump_in_bmp("spectrogram");
+}
+
+void test_mask(SndCleaner* cleaner){
+	Spectrogram* s = cleaner->spmanager->get_spectrogram();
 	int c = s->get_current_frame();
 	uint8_t** bin = (uint8_t**) malloc(sizeof(uint8_t *)*c);
 	for(int k=0; k<c; k++){
@@ -712,37 +855,102 @@ void SndCleaner::compute_spectrogram(){
 		memset(bin[k], 0, sizeof(uint8_t)*1024);
 	}
 	Mask* m = alloc_mask(M1);
-	//apply_mask(s->get_data(), bin, c, 26, m, CROPPED);
-	s->plot();
+	apply_mask(s->get_data(), bin, c, 26, m, CROPPED);
 	//print_mel_filterbank(1024, 26, 22050.);
-	//s->plot_binarized_spectrogram(bin);
-	s->dump_in_bmp("spectrogram");
-	delete s;
-	free(pulled_data);
+	s->plot_binarized_spectrogram(bin);
+	s->dump_in_bmp("maskspectrogram");
+
 	free_msk(m);
 	for(int k=0; k<c; k++){
 		free(bin[k]);
 	}
 	free(bin);
-	//free(spectrum);
-	std::cout << "finished to compute spectrogram" << std::endl;
+}
+
+
+
+void print_byte_ratio(SndCleaner* sc1, SndCleaner* sc2){
+	sc1->open_stream();
+	sc2->open_stream();
+
+	pthread_t dump_thread;
+
+	pthread_dump_arg dump_args;
+
+	dump_args.len = STREAM_BUFFER_SIZE;
+	dump_args.sc = sc1;
+
+	pthread_create(&dump_thread,
+                   NULL,
+                   sc_dump_frames,
+                   (void *) &dump_args);
+	sc1->compute_mel_spectrogram();
+	pthread_join(dump_thread, NULL);
+	dump_args.sc = sc2;
+	pthread_create(&dump_thread,
+                   NULL,
+                   sc_dump_frames,
+                   (void *) &dump_args);
+	sc2->compute_mel_spectrogram();
+	pthread_join(dump_thread, NULL);
+	
+	if(sc2->get_mel_size() != sc1->get_mel_size()){
+		std::cerr << "mel size mismatch" <<std::endl;
+	}
+	int byte_size = 4*(sc1->get_mel_size()/32+1);
+	int nb_bits = sc1->get_mel_size();
+	Spectrogram* s1 = sc1->spmanager->get_spectrogram();
+	Spectrogram* s2 = sc2->spmanager->get_spectrogram();
+	int c1 = s1->get_current_frame();
+	int c2 = s2->get_current_frame();
+
+	void* bin1 = calloc(c1, byte_size);
+	void* bin2 = calloc(c2, byte_size);
+
+	float* ratios = (float*) calloc(c2-c1, sizeof(float));
+	std::cout << "len of ratios: " << c2-c1 << std::endl;
+
+	Mask* m = alloc_mask(M3);
+	
+	apply_mask_to_bit_value(s1->get_data(), bin1, byte_size, c1, nb_bits, m, CROPPED);
+	int* pbin1=(int*)bin1;
+	int* ppbin1=(int*)bin1;
+	for(;pbin1<c1+ppbin1; pbin1++){
+		std::cout << *pbin1 << " ";
+	}
+	std::cout <<"\n";
+	apply_mask_to_bit_value(s2->get_data(), bin2, byte_size, c2, nb_bits, m, CROPPED);
+
+	find_stream_index((void*) bin1, (void*) bin2, ratios, byte_size, nb_bits, c1, c2);
+
+	for(int i=0; i<c2-c1; i++){
+		std::cout << ratios[i] << " ";
+	}
+	std::cout <<"\n";
+	
+	free_msk(m);
+
+	free(bin1);
+	free(bin2);
+	free(ratios);
 }
 
 
 int main(int argc, char *argv[]) {
 	ProgramOptions poptions;
-
+	bool test=false;
   	po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
         ("with-playback", po::bool_switch(&poptions.with_playback)->default_value(false), "Should play back the input stream")
         ("size,s", po::value(&poptions.fft_size)->default_value(2048), "The size of the spectrum")
-    	("input,i", po::value(&poptions.filename), "the name of the input file")
-    	("take-half", po::bool_switch(&poptions.take_half), "should we drop half of the spectrum")
+    	("input,i", po::value<std::vector<std::string>>(), "the names of the input files")
+    	("take-half", po::bool_switch(&poptions.take_half)->default_value(true), "should we drop half of the spectrum")
     	("apply-window,w", po::bool_switch(&poptions.apply_window), "should an windowing function be applied")
     	("window-type", po::value(&poptions.window), "the windowing function to apply.\n\t1: rectangular\n\t2: blackmann\n\t4: hanning\n\t8: hamming")
      	("mel", po::value(&poptions.mel), "If set, the spectrum will be converted to mel scale with the specified number of windows")
-  
+        ("test", po::bool_switch(&test)->default_value(false), "run tests")
+  		
     ;
 
 	po::positional_options_description p;
@@ -757,36 +965,43 @@ int main(int argc, char *argv[]) {
 		std::cout << desc << "\n";
 		return 0;
     }
+
+    if(test){
+    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+    	SndCleaner sc(&poptions);
+    	//test_bit_operations();
+    	test_spectrogram(&sc);
+    	test_mask(&sc);
+    	//test_playback(&sc);
+    	return 0;
+    }
     if(!vm.count("input")) {
     	std::cout << "YOU MUST SPECIFY AN INPUT FILE" << "\n";
 		std::cout << desc << "\n";
 		return 0;
     }
+    std::cout << "inputs: " << vm.count("input") << std::endl;
+    if(vm["input"].as<std::vector<std::string>>().size()==2){
+    	if(poptions.with_playback){
+    		std::cerr << "playback is not supported with two files" << std::endl;
+    		poptions.with_playback=false;
+    	}
+    	if(poptions.mel==-1)
+    		poptions.mel=26;
+    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+    	ProgramOptions poptions2;
+    	poptions2.fft_size = poptions.fft_size;
+    	poptions2.take_half=poptions.take_half;
+    	poptions2.mel=poptions.mel;
+    	poptions2.apply_window = poptions.apply_window;
+    	poptions2.window=poptions.window;
+    	poptions2.filename=vm["input"].as<std::vector<std::string>>()[1];
+    	SndCleaner sc1(&poptions);
+    	SndCleaner sc2(&poptions2);
+    	print_byte_ratio(&sc1, &sc2);
+    }
 
-	SndCleaner cleaner(&poptions); 
-	cleaner.open_stream();
-
-	pthread_t read_thread;
-	pthread_t dump_thread;
-
-	pthread_dump_arg dump_args;
-
-	dump_args.len = STREAM_BUFFER_SIZE;
-	dump_args.sc = &cleaner;
-
-	std::cout << "lauching threads" << std::endl;
-
-	// pthread_create(&read_thread,
- //                   NULL,
- //                   sc_read_frames,
- //                   (void *) &cleaner);
-	pthread_create(&dump_thread,
-                   NULL,
-                   sc_dump_frames,
-                   (void *) &dump_args);
-	//cleaner.player->start_playback();
-	cleaner.compute_spectrogram();
-	pthread_join(dump_thread, NULL);
-	std::cout << "dump thread joined" << std::endl;
+	
+	
 	return 0;
 }

@@ -2,7 +2,7 @@
 #define _SPECTROGRAM_H_
 #include <SDL2/SDL.h>
 #define SPECTROGRAM_BASE_SIZE 100
-
+#include <string>
 class Spectrogram{
 public:
 	Spectrogram(int size);
@@ -15,7 +15,7 @@ public:
 	SDL_Window* get_window();
 	void plot();
 	void plot_binarized_spectrogram(uint8_t** bin);
-	void dump_in_bmp(const char*);
+	void dump_in_bmp(std::string filename);
 	void set_fft_size(int size);
 	int get_current_frame();
 	double** get_data();
@@ -24,7 +24,7 @@ protected:
 	int temp_frames_nb=SPECTROGRAM_BASE_SIZE;
 	int current_frame=0;
 	double** data;
-	int fft_size=0;
+	int data_size=0;
 	SDL_Window* window;
 	SDL_Renderer* renderer;
 };

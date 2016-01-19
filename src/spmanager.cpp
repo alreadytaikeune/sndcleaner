@@ -25,6 +25,7 @@ SpectrumManager::~SpectrumManager(){
 	fftw_free(fft_in);
 	fftw_free(fft_out);
 	fftw_destroy_plan(trans);
+	delete spectrogram;
 }
 
 
@@ -73,7 +74,7 @@ void SpectrumManager::compute_spectrum(int16_t* in, double* out){
 		tmp=out;
 	}
 	for(i=0;i<idx_max;i++){
-		out[i]=sqrt(pow(fft_out[i][0],2)+pow(fft_out[i][1],2));
+		tmp[i]=sqrt(pow(fft_out[i][0],2)+pow(fft_out[i][1],2));
 	}
 	// std::cout << "written out up to address " << &out[idx_max-1] << std::endl;
 
@@ -83,7 +84,6 @@ void SpectrumManager::compute_spectrum(int16_t* in, double* out){
 			return;
 		}
 		if(OPT_FLAG_ISSET(pipeline_plan, APPLY_MEL_RESCALING)){
-			double* mel = (double*) malloc(sizeof(double)*MEL_SIZE);
 			to_mel_scale(tmp, out, idx_max, MEL_SIZE, sampling/2);
 			free(tmp);
 		}
@@ -130,4 +130,12 @@ int SpectrumManager::set_open_mode(int open_mode){
 
 void SpectrumManager::set_pipeline(int pipeline){
 	pipeline_plan=pipeline;
+}
+
+bool SpectrumManager::is_mel_flag_set(){
+	return OPT_FLAG_ISSET(pipeline_plan, APPLY_MEL_RESCALING);
+}
+
+Spectrogram* SpectrumManager::get_spectrogram(){
+	return spectrogram;
 }
