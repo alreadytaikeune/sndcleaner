@@ -2,10 +2,10 @@
 #include <iostream>
 #include "sndcleaner.h"
 #include <assert.h>
-#include "utils.h"
 #include "processor.h"
 #include <boost/program_options.hpp>
 #include "cleansound.h"
+#include <bitset>
 namespace po = boost::program_options;
 
 // compatibility with newer API
@@ -173,7 +173,6 @@ SndCleaner::SndCleaner(ProgramOptions* op){
 	conversion_out_format.sample_rate = OUT_SAMPLE_RATE;
 	conversion_out_format.channel_layout = AV_CH_LAYOUT_MONO;
 	swr = swr_alloc();
-	std::cerr << "trying to create ring buffer" << std::endl;
 	int nb_readers = options->with_playback ? 2 : 1;
 	int s = rb_create(data_buffer, DATA_BUFFER_SIZE, nb_readers);
 	if(s < 0){
@@ -217,7 +216,6 @@ SndCleaner::SndCleaner(ProgramOptions* op){
 		player->set_cond_wait_write_parameters(&data_writable_mutex, &data_writable_cond);
 		player->set_spectrum_manager(spmanager);
 	}
-	std::cerr << "ok" << std::endl;
 }
 
 
@@ -243,8 +241,6 @@ void SndCleaner::open_stream(){
 		exit(EXIT_FAILURE);
 	}
 
-	std::cout << "finding stream info " << std::endl;
-
 	// Retrieve stream information
 	if(avformat_find_stream_info(pFormatCtx, NULL)<0){
 		std::cerr << "Error finding stream information" << std::endl;
@@ -269,11 +265,9 @@ void SndCleaner::open_stream(){
 
 	}
 
-	std::cout << "audio stream is " << audioStreamId << std::endl;
 	// Get a pointer to the codec context for the audio stream
 	pCodecCtxOrig=pFormatCtx->streams[audioStreamId]->codec;
 
-	std::cout << "pCodecOrig found" << std::endl;
 
 	// Now find the actual codec and open it
 
@@ -281,9 +275,6 @@ void SndCleaner::open_stream(){
 
 	// Find the decoder for the audio stream
 	pCodec=avcodec_find_decoder(pCodecCtxOrig->codec_id);
-
-
-	std::cout << "pCodec found" << std::endl;
 
 	if(pCodec==NULL) {
 	  std::cerr << "Unsupported codec!" << std::endl;
@@ -318,7 +309,7 @@ void SndCleaner::open_stream(){
 	av_opt_set_sample_fmt(swr, "out_sample_fmt", conversion_out_format.sample_fmt,  0);
 	swr_init(swr);
 
-	std::cout << "stream successfully opened" << std::endl;
+	//std::cout << "stream successfully opened" << std::endl;
 }
 
 /*
@@ -610,6 +601,13 @@ int SndCleaner::get_mel_size(){
 	return options->mel;
 }
 
+int SndCleaner::get_fft_size(){
+	return options->fft_size;
+}
+
+int SndCleaner::get_sampling(){
+	return conversion_out_format.sample_rate;
+}
 
 void plotData(int16_t* data, int len, int nsize){
 	PLFLT x[nsize];
@@ -621,7 +619,7 @@ void plotData(int16_t* data, int len, int nsize){
 
 	std::cout << "len is " << len << std::endl;
 
-	PLFLT max_value = (PLFLT) max_abs(data, len);
+	PLFLT max_value = (PLFLT) max_abs<int16_t>(data, len);
     PLFLT xmin = 0., xmax = len/((float) OUT_SAMPLE_RATE), ymin = 0., ymax = 1.0;
     int i,j;
     std::cout << "smax: " << xmax << std::endl;
@@ -664,12 +662,10 @@ void plotData(int16_t* data, int len, int nsize){
 
 void SndCleaner::compute_spectrogram(){
 	Spectrogram* s = new Spectrogram(options->fft_size); // s is destroyed in the spmanager's destructor
-	std::cout << "allocated spectrogram at " << s << std::endl;
 	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
 		std::cerr << "impossible to register spectrogram" << std::endl;
 		exit(EXIT_FAILURE);
 	}
-	s->initialize_for_rendering();
 	int len,lread=0;
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
@@ -691,7 +687,7 @@ void SndCleaner::compute_spectrogram(){
 			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
 			len-=lread;
 			if(lread==0 && reached_end()){
-				std::cout << "no more data" << std::endl;
+				//std::cout << "no more data" << std::endl;
 				break;
 			}
 
@@ -714,12 +710,10 @@ void SndCleaner::compute_mel_spectrogram(){
 		exit(1);
 	}
 	Spectrogram* s = new Spectrogram(options->mel); // s is destroyed in the spmanager's destructor
-	std::cout << "allocated spectrogram at " << s << std::endl;
 	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
 		std::cerr << "impossible to register spectrogram" << std::endl;
 		exit(EXIT_FAILURE);
 	}
-	s->initialize_for_rendering();
 	int len,lread=0;
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
@@ -740,7 +734,7 @@ void SndCleaner::compute_mel_spectrogram(){
 			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
 			len-=lread;
 			if(lread==0 && reached_end()){
-				std::cout << "no more data" << std::endl;
+				//std::cout << "no more data" << std::endl;
 				break;
 			}
 
@@ -842,6 +836,8 @@ void test_spectrogram(SndCleaner* cleaner){
 	pthread_join(dump_thread, NULL);
 	std::cout << "dump thread joined" << std::endl;
 	Spectrogram* s = cleaner->spmanager->get_spectrogram();
+	s->initialize_for_rendering();
+
 	s->plot();
 	s->dump_in_bmp("spectrogram");
 }
@@ -869,7 +865,7 @@ void test_mask(SndCleaner* cleaner){
 
 
 
-void print_byte_ratio(SndCleaner* sc1, SndCleaner* sc2){
+void plot_byte_ratio(SndCleaner* sc1, SndCleaner* sc2){
 	sc1->open_stream();
 	sc2->open_stream();
 
@@ -898,35 +894,56 @@ void print_byte_ratio(SndCleaner* sc1, SndCleaner* sc2){
 		std::cerr << "mel size mismatch" <<std::endl;
 	}
 	int byte_size = 4*(sc1->get_mel_size()/32+1);
-	int nb_bits = sc1->get_mel_size();
+	const int nb_bits = sc1->get_mel_size();
 	Spectrogram* s1 = sc1->spmanager->get_spectrogram();
 	Spectrogram* s2 = sc2->spmanager->get_spectrogram();
 	int c1 = s1->get_current_frame();
 	int c2 = s2->get_current_frame();
-
 	void* bin1 = calloc(c1, byte_size);
 	void* bin2 = calloc(c2, byte_size);
+
+	// s2->initialize_for_rendering();
+	// s2->plot();
+
 
 	float* ratios = (float*) calloc(c2-c1, sizeof(float));
 	std::cout << "len of ratios: " << c2-c1 << std::endl;
 
-	Mask* m = alloc_mask(M3);
+	Mask* m = alloc_mask(M1);
 	
 	apply_mask_to_bit_value(s1->get_data(), bin1, byte_size, c1, nb_bits, m, CROPPED);
-	int* pbin1=(int*)bin1;
-	int* ppbin1=(int*)bin1;
-	for(;pbin1<c1+ppbin1; pbin1++){
-		std::cout << *pbin1 << " ";
-	}
-	std::cout <<"\n";
 	apply_mask_to_bit_value(s2->get_data(), bin2, byte_size, c2, nb_bits, m, CROPPED);
 
-	find_stream_index((void*) bin1, (void*) bin2, ratios, byte_size, nb_bits, c1, c2);
+
+	compute_bit_error_ratios((void*) bin1, (void*) bin2, ratios, byte_size, nb_bits, c1, c2);
 
 	for(int i=0; i<c2-c1; i++){
 		std::cout << ratios[i] << " ";
 	}
 	std::cout <<"\n";
+
+	PLFLT* x= (PLFLT*) malloc(c2*sizeof(PLFLT));
+	PLFLT* y= (PLFLT*) malloc(c2*sizeof(PLFLT));
+
+    PLFLT xmin = 0., xmax = c2, ymin = 0., ymax = 1.0;
+
+	int i;
+	for(i=0;i<c2;i++){
+		x[i]=i;
+		y[i] = ratios[i];
+	}
+
+	plinit();
+
+    // Create a labelled box to hold the plot.
+    plenv( xmin, xmax, ymin, ymax, 0, 0 );
+    //pllab( "x", "y=100 x#u2#d", "Simple PLplot demo of a 2D line plot" );
+
+    // Plot the data that was prepared above.
+    plline(c2-c1, x, y);
+
+    // Close PLplot library
+    plend();
 	
 	free_msk(m);
 
@@ -934,6 +951,65 @@ void print_byte_ratio(SndCleaner* sc1, SndCleaner* sc2){
 	free(bin2);
 	free(ratios);
 }
+
+void find_in_stream(SndCleaner* sc1, SndCleaner* sc2){
+	if(sc2->get_mel_size() != sc1->get_mel_size()){
+		throw std::invalid_argument("Inconherent mel sizes");
+	}
+
+	if(sc2->get_fft_size() != sc1->get_fft_size()){
+		throw std::invalid_argument("Inconherent fft sizes");
+	}
+
+	sc1->open_stream();
+	sc2->open_stream();
+
+	pthread_t dump_thread;
+
+	pthread_dump_arg dump_args;
+
+	dump_args.len = STREAM_BUFFER_SIZE;
+	dump_args.sc = sc1;
+
+	pthread_create(&dump_thread,
+                   NULL,
+                   sc_dump_frames,
+                   (void *) &dump_args);
+	sc1->compute_mel_spectrogram();
+	pthread_join(dump_thread, NULL);
+	dump_args.sc = sc2;
+	pthread_create(&dump_thread,
+                   NULL,
+                   sc_dump_frames,
+                   (void *) &dump_args);
+	sc2->compute_mel_spectrogram();
+	pthread_join(dump_thread, NULL);
+	Spectrogram* s1 = sc1->spmanager->get_spectrogram();
+	Spectrogram* s2 = sc2->spmanager->get_spectrogram();
+	float* occurrences = (float*) malloc(4);
+	Mask* m = alloc_mask(M3);
+	int c1 = s1->get_current_frame();
+	int c2 = s2->get_current_frame();
+
+	int fft_size = sc1->get_fft_size();
+	float sampling = (float) sc1->get_sampling();
+	int d = find_time_occurences(&occurrences, s1->get_data(), s2->get_data(), sc2->get_mel_size(), 
+		c1, c2, m, fft_size, sampling);
+
+	if(d < -1){
+		std::cerr << "An error happened" << std::endl;
+	}
+	std::cout << d << " occurrences found: " << std::endl;
+	for(int i=0; i<d; i++){
+		std::cout << occurrences[i] <<"s ";
+	}
+	std::cout << "\n";
+
+	free(m);
+	free(occurrences);
+}
+
+
 
 
 int main(int argc, char *argv[]) {
@@ -950,7 +1026,7 @@ int main(int argc, char *argv[]) {
     	("window-type", po::value(&poptions.window), "the windowing function to apply.\n\t1: rectangular\n\t2: blackmann\n\t4: hanning\n\t8: hamming")
      	("mel", po::value(&poptions.mel), "If set, the spectrum will be converted to mel scale with the specified number of windows")
         ("test", po::bool_switch(&test)->default_value(false), "run tests")
-  		
+  		("find", po::bool_switch()->default_value(false), "tries to find arg1, in arg2")
     ;
 
 	po::positional_options_description p;
@@ -967,6 +1043,26 @@ int main(int argc, char *argv[]) {
     }
 
     if(test){
+    	if(vm["input"].as<std::vector<std::string>>().size()==2){
+	    	if(poptions.with_playback){
+	    		std::cerr << "playback is not supported with two files" << std::endl;
+	    		poptions.with_playback=false;
+	    	}
+	    	if(poptions.mel==-1)
+	    		poptions.mel=26;
+	    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+	    	ProgramOptions poptions2;
+	    	poptions2.fft_size = poptions.fft_size;
+	    	poptions2.take_half=poptions.take_half;
+	    	poptions2.mel=poptions.mel;
+	    	poptions2.apply_window = poptions.apply_window;
+	    	poptions2.window=poptions.window;
+	    	poptions2.filename=vm["input"].as<std::vector<std::string>>()[1];
+	    	SndCleaner sc1(&poptions);
+	    	SndCleaner sc2(&poptions2);
+	    	plot_byte_ratio(&sc1, &sc2);
+	    	return 0;
+	    }
     	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
     	SndCleaner sc(&poptions);
     	//test_bit_operations();
@@ -980,28 +1076,36 @@ int main(int argc, char *argv[]) {
 		std::cout << desc << "\n";
 		return 0;
     }
-    std::cout << "inputs: " << vm.count("input") << std::endl;
-    if(vm["input"].as<std::vector<std::string>>().size()==2){
-    	if(poptions.with_playback){
-    		std::cerr << "playback is not supported with two files" << std::endl;
-    		poptions.with_playback=false;
-    	}
-    	if(poptions.mel==-1)
-    		poptions.mel=26;
-    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
-    	ProgramOptions poptions2;
-    	poptions2.fft_size = poptions.fft_size;
-    	poptions2.take_half=poptions.take_half;
-    	poptions2.mel=poptions.mel;
-    	poptions2.apply_window = poptions.apply_window;
-    	poptions2.window=poptions.window;
-    	poptions2.filename=vm["input"].as<std::vector<std::string>>()[1];
-    	SndCleaner sc1(&poptions);
-    	SndCleaner sc2(&poptions2);
-    	print_byte_ratio(&sc1, &sc2);
-    }
 
-	
+    if(vm.count("find")){
+    	if(vm["input"].as<std::vector<std::string>>().size()==2){
+	    	if(poptions.with_playback){
+	    		std::cerr << "playback is not supported with two files" << std::endl;
+	    		poptions.with_playback=false;
+	    	}
+	    	if(poptions.mel==-1)
+	    		poptions.mel=26;
+	    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+	    	ProgramOptions poptions2;
+	    	poptions2.fft_size = poptions.fft_size;
+	    	poptions2.take_half=poptions.take_half;
+	    	poptions2.mel=poptions.mel;
+	    	poptions2.apply_window = poptions.apply_window;
+	    	poptions2.window=poptions.window;
+	    	poptions2.filename=vm["input"].as<std::vector<std::string>>()[1];
+	    	SndCleaner sc1(&poptions);
+	    	SndCleaner sc2(&poptions2);
+	    	find_in_stream(&sc1, &sc2);
+	    	return 0;
+	    }
+	    else{
+	    	std::cout << "Not enough input arguments" << "\n";
+			std::cout << desc << "\n";
+			return 0;
+	    }
+    }
+    std::cout << "inputs: " << vm.count("input") << std::endl;
+   
 	
 	return 0;
 }

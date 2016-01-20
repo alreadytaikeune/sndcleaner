@@ -17,6 +17,7 @@ extern "C" {
 #include "ringbuffer.h"
 #include "player.h"
 #include <pthread.h>
+#include "utils.h"
 
 
 #define MAX_AUDIO_FRAME_SIZE 192000
@@ -73,6 +74,8 @@ public:
 	void compute_spectrogram();
 	void compute_mel_spectrogram();
 	int get_mel_size();
+	int get_fft_size();
+	int get_sampling();
 	//void write_stream_to_data_buffer(int len);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 

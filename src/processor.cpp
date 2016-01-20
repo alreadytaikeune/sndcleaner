@@ -3,7 +3,7 @@
 #include <cmath>
 #include <string.h>
 #include <SDL2/SDL.h>
-
+#include "errors.h"
 
 /*
 
@@ -56,7 +56,7 @@ float bit_error_ratio(void* in1, void* in2, int byte_size, int nb_bits, int len)
 	float b = (float) bit_error(in1, in2, byte_size, nb_bits, len);
 	if(b==-1)
 		return -1;
-	return b/(nb_bits*len);
+	return b/((nb_bits-1)*len);
 }
 
 
@@ -259,8 +259,6 @@ int apply_mask_to_bit_value(double** data, void* out, int out_byte_size, int w, 
 		int end_j = w-(m->msk_w-m->pvt_x-1);
 		printf("start_i: %d, end_i: %d, start_j: %d, end_j %d \n", start_i, end_i, start_j, end_j);
 		for(j=start_j;j<end_j;j++){
-			p32 = (int32_t*) out+j*out_byte_size;
-			p64 = (int64_t*) out+j*out_byte_size;
 			for(i=start_i;i<end_i;i++){
 				tmp=0.;
 				for(k=0;k<m->msk_h;k++){
@@ -277,7 +275,15 @@ int apply_mask_to_bit_value(double** data, void* out, int out_byte_size, int w, 
 					}
 				}	
 			}
+			p32++;
+			p64++;	
 		}
+	}
+	else if(mask_op==WRAPPED){
+		throw NotImplementedException("");
+	}
+	else if(mask_op==EXTENDED){
+		throw NotImplementedException("");
 	}
 	return 0;
 }

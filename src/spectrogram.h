@@ -1,7 +1,7 @@
 #ifndef _SPECTROGRAM_H_
 #define _SPECTROGRAM_H_
 #include <SDL2/SDL.h>
-#define SPECTROGRAM_BASE_SIZE 100
+#define SPECTROGRAM_BASE_SIZE 5000
 #include <string>
 class Spectrogram{
 public:
@@ -27,6 +27,7 @@ protected:
 	int data_size=0;
 	SDL_Window* window;
 	SDL_Renderer* renderer;
+	bool initialized=false;
 };
 
 #endif

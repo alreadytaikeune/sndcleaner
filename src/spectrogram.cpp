@@ -63,7 +63,7 @@ void Spectrogram::plot(){
 	int rect_w, rect_h;
 	int i,j;
 	SDL_Rect r;
-	if(!window){
+	if(!initialized){
 		std::cerr << "not initialized for rendering" << std::endl;
 	}
 	SDL_GetWindowSize(window, &w, &h);
@@ -90,7 +90,8 @@ void Spectrogram::plot(){
 	std::cout << "rect_h: " << rect_h << std::endl;
 	std::cout << "x_step: " << x_step << std::endl;
 	std::cout << "y_step: " << y_step << std::endl;
-
+	std::cout << "w: " << w << std::endl;
+	std::cout << "h: " << h << std::endl;
 	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 	// Clear window
     SDL_RenderClear(renderer);
@@ -131,9 +132,9 @@ void Spectrogram::plot_binarized_spectrogram(uint8_t** bin){
 	r.h=rect_h;
 	int grey=0;
 	for(i=0; i < current_frame; i+=x_step){
-		r.x=i*rect_w;
+		r.x=(i/x_step)*rect_w;
 		for(j=0; j < data_size; j+=y_step){
-			r.y=j*rect_h;
+			r.y=(j/y_step)*rect_h;
 			grey = bin[i][j]*255;
 			SDL_SetRenderDrawColor(renderer, grey, 0, 255-grey, 255);
 			SDL_RenderFillRect(renderer, &r);
@@ -147,6 +148,10 @@ void Spectrogram::plot_binarized_spectrogram(uint8_t** bin){
 
 
 int Spectrogram::initialize_for_rendering(){
+	if(initialized){
+		std::cout << "already initialized" << std::endl;
+		return 0;
+	}
 	window = SDL_CreateWindow("Spectrum",
                           SDL_WINDOWPOS_UNDEFINED,
                           SDL_WINDOWPOS_UNDEFINED,
@@ -160,6 +165,8 @@ int Spectrogram::initialize_for_rendering(){
   	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 	// Clear window
     SDL_RenderClear(renderer);
+    initialized=true;
+    return 0;
 }
 
 int Spectrogram::add_spectrum_with_copy(double* spec){
@@ -188,10 +195,12 @@ Spectrogram::~Spectrogram(){
 		free(data[i]);
 	}
 	free(data);
-	SDL_DestroyRenderer(renderer);
+	if(initialized){
+		SDL_DestroyRenderer(renderer);
+		SDL_DestroyWindow(window);
+		SDL_Quit();
+	}
 
-	SDL_DestroyWindow(window);
-	SDL_Quit();
 
 }
 

@@ -116,15 +116,15 @@ int SpectrumManager::register_spectrogram(Spectrogram* s, int open_mode){
 }
 
 int SpectrumManager::set_open_mode(int open_mode){
-	std::cout << "open mode is " << GET_OPEN_MODE(pipeline_plan) << std::endl;
+	// std::cout << "open mode is " << GET_OPEN_MODE(pipeline_plan) << std::endl;
 	if(open_mode != OPEN_MODE_NORMAL && open_mode != OPEN_MODE_COPY)
 		return -1;
 	if(GET_OPEN_MODE(pipeline_plan) != open_mode){
 		OPT_FLAG_SET(pipeline_plan, GET_OPEN_MODE(pipeline_plan), 0);
 		OPT_FLAG_SET(pipeline_plan, open_mode, 1);
 	}
-	std::cout << "pipeline plan is " << pipeline_plan << std::endl;
-	std::cout << "open mode is " << GET_OPEN_MODE(pipeline_plan) << std::endl;
+	// std::cout << "pipeline plan is " << pipeline_plan << std::endl;
+	// std::cout << "open mode is " << GET_OPEN_MODE(pipeline_plan) << std::endl;
 	return 0;	 
 }
 
