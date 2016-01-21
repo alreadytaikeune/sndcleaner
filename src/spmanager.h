@@ -48,6 +48,8 @@ public:
 
 	void set_fft_size(int s);
 
+	void set_sampling(double s);
+
 	/*
 	*	Registers a spectrogram. Every time a new spectrum is computed, it will be added to the spectrogram depending
 	*	on the copy mode selected. 

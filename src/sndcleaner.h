@@ -51,7 +51,7 @@ typedef struct ProgramOptions{
 	bool apply_window=true;
 	int window=WINDOW_BLACKMAN;
 	int mel=-1;
-
+	int max_time=-1;
 } ProgramOptions;
 
 
@@ -62,6 +62,10 @@ public:
 	SndCleaner(ProgramOptions* op);
 	~SndCleaner();
 	void* read_frames();
+
+	/*
+		Returns the number of packets added or -1 if we reached the end of the available packets
+	*/
 	int fill_packet_queue();
 	// void dump_queue_in_stream(uint8_t *stream, int len);
 	int dump_queue(size_t len);
@@ -71,11 +75,27 @@ public:
 	bool get_player_quit();
 	void start_playback();
 	bool supports_playback();
+
+
+	/*
+		Computes the spectrogram by reading as much as possible from the data buffer. This function can
+		be called with mel scale though it is not memory efficient. The computation of the spectrum is 
+		done with the spectrum manager. The spectrogram is registered as open mode normal, meaning that 
+		it is the responsibility of the programmer not to free the spectra until they have no more use
+		otherwise the spectrogram will have its data removed. If the spectra are not manually freed by the
+		user, the destructor of the spectrogram takes care of it.
+	*/
 	void compute_spectrogram();
 	void compute_mel_spectrogram();
 	int get_mel_size();
 	int get_fft_size();
 	int get_sampling();
+
+	/*
+		Fills the data buffer as much as possible. Returns the number of bytes written. It is equal to
+		get_write_space if enough data to write, or the length of the data that was left to be decoded.
+	*/
+	int fill_buffer();
 	//void write_stream_to_data_buffer(int len);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 
@@ -104,4 +124,6 @@ private:
 	bool received_packets=false;
 	bool no_more_packets=false;
 	ProgramOptions* options;
+	unsigned long max_byte=-1;
+	unsigned long bytes_read=0;
 };

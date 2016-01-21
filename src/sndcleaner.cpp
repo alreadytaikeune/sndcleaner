@@ -6,6 +6,7 @@
 #include <boost/program_options.hpp>
 #include "cleansound.h"
 #include <bitset>
+#include <vector> // no especially useful though handy, may remove
 namespace po = boost::program_options;
 
 // compatibility with newer API
@@ -30,7 +31,7 @@ static bool buffer_full = false;
 *	TODO:
 		- Add arg checking
 		- finish the add spectrogram with copy pipeline
-*
+		- add max seconds argument
 */
 
 
@@ -183,6 +184,8 @@ SndCleaner::SndCleaner(ProgramOptions* op){
   	pthread_mutex_init(&data_writable_mutex, NULL);
   	pthread_cond_init (&data_writable_cond, NULL);
 
+  	// Parsing options
+
   	int pipeline=0;
 
   	if(op->apply_window){
@@ -201,9 +204,14 @@ SndCleaner::SndCleaner(ProgramOptions* op){
 		pipeline |= APPLY_MEL_RESCALING;
 	}
 
+
+	if(op->max_time>0){
+		max_byte = op->max_time*conversion_out_format.sample_rate*av_get_bytes_per_sample(conversion_out_format.sample_fmt);
+	}
+
+	std::cout << "max byte: " << max_byte << std::endl;
   	spmanager->set_pipeline(pipeline);
-  		
-  	
+  	spmanager->set_sampling(conversion_out_format.sample_rate);
 
 	if(options->with_playback){
 		player = new Player(data_buffer);
@@ -312,9 +320,7 @@ void SndCleaner::open_stream(){
 	//std::cout << "stream successfully opened" << std::endl;
 }
 
-/*
-*	Returns the number of packets added or -1 if we reached the end of the available packets
-*/
+
 int SndCleaner::fill_packet_queue(){
 	int nb=0;
 	AVPacket packet;
@@ -484,18 +490,6 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
   }
 }
 
-/*
-*  Processes and writes len number of bytes from the stream to the data buffer. 
-*/
-// void SndCleaner::write_stream_to_data_buffer(int len){
-// 	if(data_buffer_idx + len/2 >= DATA_BUFFER_SIZE)
-// 		len = (DATA_BUFFER_SIZE - data_buffer_idx)*2;
-// 	memcpy(data_buffer+data_buffer_idx, stream_buffer, len);
-// 	// we only increment the pointer by len/2 because stream_buffer is uint8_t* and
-// 	// data_buffer int16_t* 
-// 	data_buffer_idx+=len/2; 
-
-// }
 
 bool SndCleaner::get_player_quit(){
 	if(!options->with_playback)
@@ -512,6 +506,35 @@ void* sc_read_frames(void* thread_arg){
 	std::cout << "starting to read frames" << std::endl;
     SndCleaner* sc = (SndCleaner*) thread_arg;
 	sc->read_frames();
+}
+
+
+int SndCleaner::fill_buffer(){
+	pthread_mutex_lock(&data_writable_mutex);
+	int to_write_total = rb_get_write_space(data_buffer);
+	int len_written=0, lread=0;
+	fill_packet_queue();
+	int to_write;
+	while(len_written < to_write_total){
+		if(max_byte<=0){
+			break;
+		}
+		if(to_write_total-len_written > max_byte){
+			to_write = max_byte;
+		}
+		lread=dump_queue(to_write_total-len_written);
+		len_written+=lread;
+		max_byte-=lread;
+		if(len_written < to_write_total){
+			if(fill_packet_queue() == -1){
+				// there is no more packet to read, we reached the end of the data
+				break;
+			} 
+		}
+	}
+	pthread_mutex_unlock(&data_writable_mutex);
+	std::cout << "buffer filled" << std::endl;
+	return len_written;
 }
 
 
@@ -609,52 +632,32 @@ int SndCleaner::get_sampling(){
 	return conversion_out_format.sample_rate;
 }
 
-void plotData(int16_t* data, int len, int nsize){
-	PLFLT x[nsize];
-	PLFLT y[nsize];
-	if(x==NULL || y==NULL){
-		std::cerr << "unable to allocate memory" << std::endl;
-		exit(EXIT_FAILURE);
-	}
+template<typename T>
+void plotData(T* data, int len){
+	PLFLT x[len];
+	PLFLT y[len];
 
-	std::cout << "len is " << len << std::endl;
-
-	PLFLT max_value = (PLFLT) max_abs<int16_t>(data, len);
-    PLFLT xmin = 0., xmax = len/((float) OUT_SAMPLE_RATE), ymin = 0., ymax = 1.0;
+	PLFLT max_value = (PLFLT) max_abs(data, len);
+    PLFLT xmin = 0., xmax = len, ymin = 0., ymax = max_value;
     int i,j;
-    std::cout << "smax: " << xmax << std::endl;
-    std::cout << "max value: " << max_value << std::endl;
-    int step = len/nsize+1;
-    std::cout << "step: " << step << std::endl;
     int mean = 0;
-    // Prepare data to be plotted.
-    for (i = 0; i < len; i+=step)
+    for (i = 0; i < len; i++)
     {
-    	x[i/step] = (PLFLT) ( i ) / (PLFLT) (OUT_SAMPLE_RATE);
-    	mean = 0;
-    	for(j=0; j < step && i+j < len; j++){
-    		mean+=std::abs(data[i+j]);
-    	}
-        
-        y[i/step] = mean / max_value /step;
+    	x[i] = (PLFLT) i;
+        y[i] = (PLFLT) data[i];
     }
-
-    // Parse and process command line arguments
-    // plparseopts(&argc, argv, PL_PARSE_FULL);
 
     // Initialize plplot
     plinit();
 
     // Create a labelled box to hold the plot.
     plenv( xmin, xmax, ymin, ymax, 0, 0 );
-    //pllab( "x", "y=100 x#u2#d", "Simple PLplot demo of a 2D line plot" );
 
     // Plot the data that was prepared above.
-    plline(nsize, x, y);
+    plline(len, x, y);
 
     // Close PLplot library
     plend();
-    std::cout << "ended" << std::endl;
 }
 
 
@@ -670,24 +673,19 @@ void SndCleaner::compute_spectrogram(){
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
 	double* spectrum;
-	std::cout << "starting to compute spectrogram" << std::endl;
-	//spectrum=(double*) malloc(sizeof(double)*2048/2);
+
 	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
-		// print_buffer_stats(data_buffer);
 		spectrum=(double*) malloc(sizeof(double)*(options->fft_size));
 		if(!spectrum)
 			exit(1);
-		// std::cout << "spectrum allocated " << sizeof(double)*2048/2 << " bytes at address " << spectrum << std::endl;
 		pthread_mutex_lock(&data_writable_mutex);
-		// Open mode normal, only pointer is copied in the spectrogram
-		// it is freed in the destructor, normally no memory leak
+
 		len=flen;
 		lread=0;
 		while(len>0){
 			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
 			len-=lread;
 			if(lread==0 && reached_end()){
-				//std::cout << "no more data" << std::endl;
 				break;
 			}
 
@@ -699,7 +697,6 @@ void SndCleaner::compute_spectrogram(){
 	}
 
 	free(pulled_data);
-	std::cout << "finished to compute spectrogram" << std::endl;
 }
 
 
@@ -718,7 +715,6 @@ void SndCleaner::compute_mel_spectrogram(){
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
 	double* spectrum;
-	std::cout << "starting to compute mel spectrogram" << std::endl;
 
 	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
 		spectrum=(double*) calloc(options->mel, sizeof(double)); // must be a calloc and not a malloc, because it is not zeroed out in the mel scale function, so the incrementation goes wrong
@@ -745,7 +741,6 @@ void SndCleaner::compute_mel_spectrogram(){
 	}
 
 	free(pulled_data);
-	std::cout << "finished to compute spectrogram" << std::endl;
 }
 
 void test_bit_operations(){
@@ -779,8 +774,6 @@ void test_bit_operations(){
 	float adiff = bit_error_ratio((void*) ai1, (void*) ai2, sizeof(int), 32, 2);
 
 	std::cout << adiff << std::endl;
-
-
 }
 
 
@@ -952,6 +945,7 @@ void plot_byte_ratio(SndCleaner* sc1, SndCleaner* sc2){
 	free(ratios);
 }
 
+
 void find_in_stream(SndCleaner* sc1, SndCleaner* sc2){
 	if(sc2->get_mel_size() != sc1->get_mel_size()){
 		throw std::invalid_argument("Inconherent mel sizes");
@@ -1009,6 +1003,42 @@ void find_in_stream(SndCleaner* sc1, SndCleaner* sc2){
 	free(occurrences);
 }
 
+/*
+	Test of a single threaded processing of the data. Applies the various audio processing 
+	functions on the raw audio data.
+
+*/
+void test_processing_functions(SndCleaner* sc){
+	sc->open_stream();
+	int nb_milliseconds=50;
+	int len,lread=0;
+	double sampling=sc->get_sampling();
+	int size = (int)(sampling/1000)*nb_milliseconds+1;
+	int flen=size*sizeof(int16_t);
+	int16_t* pulled_data = (int16_t *) malloc(flen);
+	std::vector<double> rms_vector(200);
+	std::vector<int> zc_vector(200);
+	RingBuffer* data_buffer = sc->data_buffer;
+	sc->fill_buffer();
+	while(rb_get_read_space(data_buffer, 0)>0){
+		len=flen;
+		lread=0;
+		while(len>0){
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
+			len-=lread;
+			if(lread==0 && sc->fill_buffer() <= 0){
+				break;
+			}
+
+		}
+
+		rms_vector.push_back(root_mean_square(pulled_data, size));
+		zc_vector.push_back(zero_crossings(pulled_data, size));
+	}
+	plotData((double*)&rms_vector[0], rms_vector.size());
+	plotData((int*)&zc_vector[0], zc_vector.size());
+	free(pulled_data);
+}
 
 
 
@@ -1027,6 +1057,7 @@ int main(int argc, char *argv[]) {
      	("mel", po::value(&poptions.mel), "If set, the spectrum will be converted to mel scale with the specified number of windows")
         ("test", po::bool_switch(&test)->default_value(false), "run tests")
   		("find", po::bool_switch()->default_value(false), "tries to find arg1, in arg2")
+  		("max", po::value(&poptions.max_time), "the maximum number of seconds to take into account")
     ;
 
 	po::positional_options_description p;
@@ -1066,9 +1097,10 @@ int main(int argc, char *argv[]) {
     	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
     	SndCleaner sc(&poptions);
     	//test_bit_operations();
-    	test_spectrogram(&sc);
-    	test_mask(&sc);
+    	//test_spectrogram(&sc);
+    	//test_mask(&sc);
     	//test_playback(&sc);
+    	test_processing_functions(&sc);
     	return 0;
     }
     if(!vm.count("input")) {

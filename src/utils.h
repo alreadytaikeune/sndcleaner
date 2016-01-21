@@ -74,4 +74,13 @@ int local_maxima_zero(T* data, int len, int** indices, int* l_ind, int* nb){
 unsigned binomial(unsigned n, unsigned k);
 
 
+template<typename T>
+double mean(T* data, int len){ 
+	T sum=0;
+	for(T* it = data; it < data + len; ++it){
+		sum+=*it;
+	}
+	return sum/((double) len);
+}
+
 #endif

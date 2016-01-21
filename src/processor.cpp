@@ -41,16 +41,29 @@ void check_endianness(){
 
 
 
-void zero_crossings(){};
+int zero_crossings(int16_t* data, int len){
+	int out=0;
+	int prev = data[0] > 0 ? 1 : -1;
+	for(int i=1; i<len; i++){
+		if(data[i]*prev <= 0){
+			out++;
+			prev=-prev;
+		}
+	}
+	return out;
+}
+
+
+
 void spectral_flux(){};
 
-
-
-double bit_error_rate(void* in1, void* in2){
-
-
-};
-
+double root_mean_square(int16_t* data, int len){
+	double out=0.;
+	for(int i=0; i<len;i++){
+		out+= (double) pow(data[i], 2);
+	}
+	return sqrt(out/len);
+}
 
 float bit_error_ratio(void* in1, void* in2, int byte_size, int nb_bits, int len){
 	float b = (float) bit_error(in1, in2, byte_size, nb_bits, len);

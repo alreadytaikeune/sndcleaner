@@ -139,3 +139,7 @@ bool SpectrumManager::is_mel_flag_set(){
 Spectrogram* SpectrumManager::get_spectrogram(){
 	return spectrogram;
 }
+
+void SpectrumManager::set_sampling(double s){
+	sampling=s;
+}

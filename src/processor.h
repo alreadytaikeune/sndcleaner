@@ -2,9 +2,8 @@
 #define _PROCESSOR_H_
 #include "mask.h"
 
-void zero_crossings();
-void spectral_flux();
-void bit_error_rate();
+int zero_crossings(int16_t* data, int len);
+
 void kl_divergence();
 void bayesian_information_score();
 
@@ -56,5 +55,6 @@ void apply_mask(double** data, uint8_t** out, int w, int h, Mask* m, int mask_op
 
 int apply_mask_to_bit_value(double** data, void* out, int out_byte_size, int w, int h, Mask* m, int mask_op);
 
+double root_mean_square(int16_t* data, int len);
 
 #endif
