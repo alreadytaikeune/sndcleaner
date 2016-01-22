@@ -1,8 +1,10 @@
 #ifndef _PROCESSOR_H_
 #define _PROCESSOR_H_
 #include "mask.h"
+#include "utils.h"
 
 int zero_crossings(int16_t* data, int len);
+double zero_crossing_rate(int16_t* data, int len);
 
 void kl_divergence();
 void bayesian_information_score();
@@ -39,7 +41,14 @@ float bit_error_ratio(void* in1, void* in2, int byte_size, int nb_bits, int len)
 */
 void to_mel_scale(double* data, double* out, int fft_size, int mel_nb, double freq_max);
 
-void compression_level();
+/*
+	Computes the histogram of the value distribution to determine the level of compression. The value range 
+	is brought down to [0, 1]. This interval is divided into nb_bands subbands. For each frame the 
+	corresponding subband is computed and the number of values in this subband, stored in the array bands, is
+	incremented. The bands array must be 0 filled before the first call to this function.
+*/
+void compression_levels(int16_t* data, int len, int* bands, int nb_bands);
+
 
 /*
 *	Debbuging function to print the different triangular windows

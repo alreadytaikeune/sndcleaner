@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 template<typename T>
-int max(T* data, int len){
+T max(T* data, int len){
 	T m = 0;
 	for(T* it = data; it < data + len; ++it){
 		if(*it > m)
@@ -14,13 +14,30 @@ int max(T* data, int len){
 }
 
 template<typename T>
-int max_abs(T* data, int len){
+T max_abs(T* data, int len){
 	T m = 0;
 	for(T* it = data; it < data + len; ++it){
 		if(std::abs(*it) > m)
 			m = std::abs(*it);
 	}
 	return m;
+}
+
+
+template<typename T>
+T sum(T* data, int len){
+	T m = 0;
+	for(T* it = data; it < data + len; ++it){
+		m += *it;
+	}
+	return m;
+}
+
+template<typename T, typename U>
+void apply_coef(T* in, U* out, U coef, int len){
+	for(int i=0;i<len;i++){
+		out[i] = in[i]*coef;
+	}
 }
 
 template<typename T>
@@ -82,5 +99,27 @@ double mean(T* data, int len){
 	}
 	return sum/((double) len);
 }
+
+
+template<typename T>
+double std_deviation(T* data, int len){
+	T m = mean(data, len);
+	double v=0;
+	for(int i=0;i<len;i++){
+		v+=pow(data[i]-m, 2);
+	}
+	return std::sqrt(v);
+}
+
+template<typename T>
+double compute_centroid(T* data, int len, int order){
+	double centroid=0;
+	double s= (double) sum(data,len);
+	for(int i=0;i<len;i++){
+		centroid+=i*pow(data[i],order);
+	}
+	return centroid/s;
+}
+
 
 #endif

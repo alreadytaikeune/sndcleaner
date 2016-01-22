@@ -45,7 +45,7 @@ int zero_crossings(int16_t* data, int len){
 	int out=0;
 	int prev = data[0] > 0 ? 1 : -1;
 	for(int i=1; i<len; i++){
-		if(data[i]*prev <= 0){
+		if(data[i]*prev < 0){
 			out++;
 			prev=-prev;
 		}
@@ -53,6 +53,9 @@ int zero_crossings(int16_t* data, int len){
 	return out;
 }
 
+double zero_crossing_rate(int16_t* data, int len){
+	return zero_crossings(data, len)/((double) len);
+}
 
 
 void spectral_flux(){};
@@ -115,11 +118,6 @@ int bit_error(void* in1, void* in2, int byte_size, int nb_bits, int len){
 	return bit_err;
 }
 
-int bit_error_nb(void* in1, void* in2, int byte_size, int nb_bits, int len){
-
-}
-
-
 
 void kl_divergence(){};
 void bayesian_information_score(){};
@@ -138,7 +136,6 @@ void to_mel_scale(double* data, double* out, int fft_size, int mel_nb, double fr
 	for(int k=0;k<mel_nb-1;k++){
 		f_max=700*(pow(10, (k+2)*mel_step/2595)-1);
 		i_stop=(int) f_max/freq_step;
-		//printf("start: %d, middle: %d, stop: %d, fmin: %lf, fmiddle: %lf, fmax:%lf\n", i_start, i_middle, i_stop, f_min, f_middle, f_max);
 		for(i=i_start; i<i_stop; i++){
 			if(i<=i_middle){
 				out[k]+=data[(int)i]*(i-i_start)/(i_middle-i_start);
@@ -215,7 +212,14 @@ void print_mel_filterbank(int fft_size, int mel_nb, double freq_max){
 }
 
 
-void compression_level(){};
+void compression_levels(int16_t* data, int len, int* bands, int nb_bands){
+	float max = (float) max_abs(data, len)+1;
+	int band;
+	for(int i=0;i<len;i++){
+		band = (int)(nb_bands*std::abs(data[i])/max);
+		bands[band]++;
+	}
+}
 
 /*
 *	Mutli-threadable version of mask application without SIMD optimization

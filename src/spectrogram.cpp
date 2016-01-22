@@ -209,7 +209,6 @@ SDL_Window* Spectrogram::get_window(){
 }
 
 void Spectrogram::dump_in_bmp(std::string filename){
-
 	int w, h;
 	SDL_GetWindowSize(window, &w, &h);
 	SDL_Surface *sshot = SDL_CreateRGBSurface(0, w, h, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);

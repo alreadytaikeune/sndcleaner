@@ -22,9 +22,9 @@ extern "C" {
 
 #define MAX_AUDIO_FRAME_SIZE 192000
 #define MINUTES_IN_BUFFER 1
-#define SECONDS_IN_BUFFER 20
+#define SECONDS_IN_BUFFER 10
 #define OUT_SAMPLE_RATE  44100
-#define DATA_BUFFER_SIZE SECONDS_IN_BUFFER*OUT_SAMPLE_RATE
+#define DATA_BUFFER_SIZE SECONDS_IN_BUFFER*OUT_SAMPLE_RATE*2
 #define STREAM_BUFFER_SIZE 1152*2*4
 #define PACKET_QUEUE_MAX_NB 5000
 
@@ -97,6 +97,10 @@ public:
 	*/
 	int fill_buffer();
 	//void write_stream_to_data_buffer(int len);
+
+	int get_max_byte();
+
+	int get_time_in_bytes(float sec);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 
 	// processing berfore storing in the data buffer. It induces a performance hit but may become handy.

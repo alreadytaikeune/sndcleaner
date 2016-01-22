@@ -7,6 +7,8 @@
 #include "cleansound.h"
 #include <bitset>
 #include <vector> // no especially useful though handy, may remove
+#include "plotter.h"
+
 namespace po = boost::program_options;
 
 // compatibility with newer API
@@ -51,13 +53,13 @@ template<typename T> void print_array(T* arr, int offset, int len){
 
 
 void print_options(ProgramOptions* op){
-	std::cout << op->fft_size << std::endl;
-	std::cout << op->with_playback << std::endl;
-	std::cout << op->filename << std::endl;
-	std::cout << op->take_half << std::endl;
-	std::cout << op->apply_window << std::endl;
-	std::cout << op->window << std::endl;
-	std::cout << op->mel << std::endl;
+	std::cout << "fft_size: " << op->fft_size << std::endl;
+	std::cout << "playback: " << op->with_playback << std::endl;
+	std::cout << "filename: " << op->filename << std::endl;
+	std::cout << "half: " << op->take_half << std::endl;
+	std::cout << "apply window: " << op->apply_window << std::endl;
+	std::cout << "window: " << op->window << std::endl;
+	std::cout << "mel: " << op->mel << std::endl;
 }
 
 
@@ -515,6 +517,7 @@ int SndCleaner::fill_buffer(){
 	int len_written=0, lread=0;
 	fill_packet_queue();
 	int to_write;
+	// std::cout << "max byte: " << max_byte << std::endl;
 	while(len_written < to_write_total){
 		if(max_byte<=0){
 			break;
@@ -533,7 +536,7 @@ int SndCleaner::fill_buffer(){
 		}
 	}
 	pthread_mutex_unlock(&data_writable_mutex);
-	std::cout << "buffer filled" << std::endl;
+	// std::cout << "buffer filled with: " << len_written << std::endl;
 	return len_written;
 }
 
@@ -631,6 +634,15 @@ int SndCleaner::get_fft_size(){
 int SndCleaner::get_sampling(){
 	return conversion_out_format.sample_rate;
 }
+
+int SndCleaner::get_max_byte(){
+	return max_byte;
+}
+
+int SndCleaner::get_time_in_bytes(float sec){
+	return (int) (sec*conversion_out_format.sample_rate*av_get_bytes_per_sample(conversion_out_format.sample_fmt));
+}
+
 
 template<typename T>
 void plotData(T* data, int len){
@@ -1003,6 +1015,44 @@ void find_in_stream(SndCleaner* sc1, SndCleaner* sc2){
 	free(occurrences);
 }
 
+void
+plfbox(PLFLT x0, PLFLT y0 )
+{
+    PLFLT x[4], y[4];
+
+    x[0] = x0;
+    y[0] = 0.;
+    x[1] = x0;
+    y[1] = y0;
+    x[2] = x0 + 1.;
+    y[2] = y0;
+    x[3] = x0 + 1.;
+    y[3] = 0.;
+    plfill( 4, x, y );
+    plcol0( 1 );
+    pllsty( 1 );
+    plline( 4, x, y );
+}
+
+
+template <typename T>
+void plot_histogram(T* data, int nb_bands){
+	char string[20];
+	plinit();
+    pladv(0);
+    plvsta();
+    plwind(0, nb_bands, 0.0, 1.5);
+    for(int i=0;i<nb_bands;i++){
+    	plcol1(i / (PLFLT)nb_bands);
+    	plpsty( 0 );
+    	plfbox((PLFLT) i, (PLFLT) data[i] );
+    	sprintf( string, "%.2f", data[i] );
+    	plptex(i + .5, data[i] + 0.1, 1.0, 0.0, .5, string);
+    }
+    plend();
+}
+
+
 /*
 	Test of a single threaded processing of the data. Applies the various audio processing 
 	functions on the raw audio data.
@@ -1010,33 +1060,73 @@ void find_in_stream(SndCleaner* sc1, SndCleaner* sc2){
 */
 void test_processing_functions(SndCleaner* sc){
 	sc->open_stream();
-	int nb_milliseconds=50;
+	float nb_milliseconds=50;
 	int len,lread=0;
-	double sampling=sc->get_sampling();
-	int size = (int)(sampling/1000)*nb_milliseconds+1;
-	int flen=size*sizeof(int16_t);
-	int16_t* pulled_data = (int16_t *) malloc(flen);
-	std::vector<double> rms_vector(200);
-	std::vector<int> zc_vector(200);
+	int size=sc->get_max_byte(); // should be size_t really
+	int window_size = sc->get_time_in_bytes(nb_milliseconds/1000);
+	std::cout << "window size: " << window_size << std::endl;
+	if(size=-1){
+		size=sc->get_time_in_bytes(3); // 3
+	}
+	int total_read=0;
+	int flen=window_size;
+	int16_t* pulled_data = (int16_t *) malloc(size);
+	std::vector<double> rms_vector(0);
+	std::vector<double> zc_vector(0);
+
+	int nb_bands=10;
+	int bands[nb_bands];
+	memset((void *) bands, 0, nb_bands*sizeof(int));
+	std::vector<float*> bands_vector(0);
+	float* distrib;
+
+	std::vector<double> centroids(0);
 	RingBuffer* data_buffer = sc->data_buffer;
 	sc->fill_buffer();
-	while(rb_get_read_space(data_buffer, 0)>0){
+
+	while(1){
+		if(rb_get_read_space(data_buffer, 0)==0){
+			if(sc->fill_buffer() <=0)
+				break;
+		}
+		//std::cout << rb_get_read_space(data_buffer, 0) << std::endl;
 		len=flen;
+		if(total_read+flen > size){
+			distrib = (float*) calloc(nb_bands, sizeof(float)); // freed at the end
+			
+			compression_levels(pulled_data, total_read/2, bands, nb_bands);
+			float s=(float) sum(bands, nb_bands);
+			apply_coef(bands, distrib, 1/s, nb_bands);
+			memset((void *) bands, 0, nb_bands*sizeof(int));
+			bands_vector.push_back(distrib);
+			total_read=0;
+			centroids.push_back(compute_centroid(distrib, nb_bands, 2));
+		}
 		lread=0;
 		while(len>0){
-			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
+			// the cast only affects pulled_data so we can safely add lread without pointer arithmetic error
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data+total_read, 0, (size_t) len); 
 			len-=lread;
-			if(lread==0 && sc->fill_buffer() <= 0){
+			total_read+=lread;
+			if(lread==0 && sc->fill_buffer()<=0){
 				break;
 			}
-
 		}
-
-		rms_vector.push_back(root_mean_square(pulled_data, size));
-		zc_vector.push_back(zero_crossings(pulled_data, size));
+		//rms_vector.push_back(root_mean_square(pulled_data+total_read/2-(flen-len)/2, (flen-len)/2));
+		zc_vector.push_back(zero_crossing_rate(pulled_data+total_read/2-(flen-len)/2, (flen-len)/2));
 	}
-	plotData((double*)&rms_vector[0], rms_vector.size());
-	plotData((int*)&zc_vector[0], zc_vector.size());
+	std::cout << "out" << std::endl;
+	//plot_color_map("radio", &bands_vector[0], bands_vector.size(), nb_bands);
+	
+	//plot_histogram(distrib, nb_bands);
+	//plotData((double*)&rms_vector[0], rms_vector.size());
+	plotData((double*)&zc_vector[0], zc_vector.size());
+	//plotData((double*)&centroids[0], centroids.size());
+
+	for(std::vector<float*>::iterator it = bands_vector.begin(); it != bands_vector.end(); ++it){
+		free(*it);
+	}
+
 	free(pulled_data);
 }
 
