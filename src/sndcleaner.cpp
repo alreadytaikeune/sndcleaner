@@ -8,6 +8,8 @@
 #include <bitset>
 #include <vector> // no especially useful though handy, may remove
 #include "plotter.h"
+#include <sys/time.h>
+
 
 namespace po = boost::program_options;
 
@@ -513,22 +515,22 @@ void* sc_read_frames(void* thread_arg){
 
 int SndCleaner::fill_buffer(){
 	pthread_mutex_lock(&data_writable_mutex);
-	int to_write_total = rb_get_write_space(data_buffer);
-	int len_written=0, lread=0;
+	int to_write = rb_get_write_space(data_buffer);
+	int lread=0, len_written=0;
 	fill_packet_queue();
-	int to_write;
-	// std::cout << "max byte: " << max_byte << std::endl;
-	while(len_written < to_write_total){
+	if(to_write > max_byte)
+		to_write=max_byte;
+	while(to_write>0){
 		if(max_byte<=0){
 			break;
 		}
-		if(to_write_total-len_written > max_byte){
+		if(to_write > max_byte){
 			to_write = max_byte;
 		}
-		lread=dump_queue(to_write_total-len_written);
-		len_written+=lread;
+		lread=dump_queue(to_write);
 		max_byte-=lread;
-		if(len_written < to_write_total){
+		len_written+=lread;
+		if(lread==0){
 			if(fill_packet_queue() == -1){
 				// there is no more packet to read, we reached the end of the data
 				break;
@@ -536,7 +538,7 @@ int SndCleaner::fill_buffer(){
 		}
 	}
 	pthread_mutex_unlock(&data_writable_mutex);
-	// std::cout << "buffer filled with: " << len_written << std::endl;
+	//std::cout << "buffer filled with: " << len_written << std::endl;
 	return len_written;
 }
 
@@ -551,6 +553,7 @@ void* sc_dump_frames(void* thread_arg){
     SndCleaner* sc = arg->sc;
     int l=0;
     int i=0;
+    sc->fill_buffer();
     do{
     	// std::cout << "writing data to ringbuffer..." << std::endl;
     	if(rb_get_write_space(sc->data_buffer) < 3*len){
@@ -566,10 +569,8 @@ void* sc_dump_frames(void* thread_arg){
 
     	if(sc->get_player_quit())
     		break;
-    	sc->fill_packet_queue();
-    	l = sc->dump_queue(len);
-    	//std::cout << "done." << std::endl;
-    }while((!sc->reached_end() | l>0) && !sc->get_player_quit());
+    	l = sc->fill_buffer();
+    }while(l>0);
    
     if(sc->supports_playback()){
     	std::cout << "support playback true" << std::endl;
@@ -606,6 +607,11 @@ void* sc_dump_frames(void* thread_arg){
 bool SndCleaner::reached_end(){
 	if(!received_packets)
 		return false;
+	if(options->max_time > 1){
+		if(max_byte <=0)
+			return true;
+	}
+
 	bool b = no_more_packets && is_empty(&audioq);
 	//std::cout << "reached end " << b << std::endl;
 	return b;
@@ -685,7 +691,7 @@ void SndCleaner::compute_spectrogram(){
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
 	double* spectrum;
-
+	int count=0;
 	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
 		spectrum=(double*) malloc(sizeof(double)*(options->fft_size));
 		if(!spectrum)
@@ -697,7 +703,7 @@ void SndCleaner::compute_spectrogram(){
 		while(len>0){
 			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
 			len-=lread;
-			if(lread==0 && reached_end()){
+			if(lread==0){
 				break;
 			}
 
@@ -706,6 +712,10 @@ void SndCleaner::compute_spectrogram(){
 		pthread_mutex_unlock(&data_writable_mutex); // Very important for the matching pthread_cond_wait() routine to complete
 		
 		spmanager->compute_spectrum(pulled_data, spectrum);
+		count++;
+		if(count >4000)
+			break;
+		//std::cout << "spectrum nb: " << count << std::endl;
 	}
 
 	free(pulled_data);
@@ -843,7 +853,7 @@ void test_spectrogram(SndCleaner* cleaner){
 	Spectrogram* s = cleaner->spmanager->get_spectrogram();
 	s->initialize_for_rendering();
 
-	s->plot();
+	s->plot_up_to(8000.f, cleaner->get_sampling());
 	s->dump_in_bmp("spectrogram");
 }
 
@@ -1132,6 +1142,57 @@ void test_processing_functions(SndCleaner* sc){
 
 
 
+void test_lpc(SndCleaner* sc){
+	sc->open_stream();
+	float nb_milliseconds=20;
+	float nb_millis_overlap=5; 
+	float overlap=1-nb_millis_overlap/nb_milliseconds;
+	int p = 10;
+	int len,lread=0;
+	int window_size = sc->get_time_in_bytes(nb_milliseconds/1000);
+	window_size=512;
+	int overlap_size = sc->get_time_in_bytes(nb_millis_overlap/1000);
+	int flen=window_size;
+	int16_t* pulled_data = (int16_t *) malloc(window_size);
+	float coefs[p+1];
+	std::vector<float> errors(0);
+	RingBuffer* data_buffer = sc->data_buffer;
+	sc->fill_buffer();
+	std::cout << "window size is " << window_size << std::endl;
+	float error=0.;
+	while(1){
+		if(rb_get_read_space(data_buffer, 0)==0){
+			if(sc->fill_buffer() <=0)
+				break;
+		}
+		len=flen;
+		lread=0;
+		while(len>0){
+			lread=rb_read_overlap(data_buffer, (uint8_t *) pulled_data, 0, (size_t) len, overlap); 
+			len-=lread;
+			if(lread==0 && sc->fill_buffer()<=0){
+				break;
+			}
+		}
+		lpc_filter_optimized(pulled_data, coefs, window_size/2, p, &error);
+		std::cout << error << std::endl;
+		errors.push_back(error);
+	}
+
+	plotData((float*)&errors[0], errors.size());
+
+	free(pulled_data);
+}
+
+
+void test_solver(){
+	const int p=2;
+	const int n=4;
+	float data[n];
+
+}
+
+
 int main(int argc, char *argv[]) {
 	ProgramOptions poptions;
 	bool test=false;
@@ -1164,33 +1225,40 @@ int main(int argc, char *argv[]) {
     }
 
     if(test){
-    	if(vm["input"].as<std::vector<std::string>>().size()==2){
-	    	if(poptions.with_playback){
-	    		std::cerr << "playback is not supported with two files" << std::endl;
-	    		poptions.with_playback=false;
-	    	}
-	    	if(poptions.mel==-1)
-	    		poptions.mel=26;
-	    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
-	    	ProgramOptions poptions2;
-	    	poptions2.fft_size = poptions.fft_size;
-	    	poptions2.take_half=poptions.take_half;
-	    	poptions2.mel=poptions.mel;
-	    	poptions2.apply_window = poptions.apply_window;
-	    	poptions2.window=poptions.window;
-	    	poptions2.filename=vm["input"].as<std::vector<std::string>>()[1];
-	    	SndCleaner sc1(&poptions);
-	    	SndCleaner sc2(&poptions2);
-	    	plot_byte_ratio(&sc1, &sc2);
-	    	return 0;
-	    }
-    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
-    	SndCleaner sc(&poptions);
+    	if(vm.count("input")){
+	    	if(vm["input"].as<std::vector<std::string>>().size()==2){
+		    	if(poptions.with_playback){
+		    		std::cerr << "playback is not supported with two files" << std::endl;
+		    		poptions.with_playback=false;
+		    	}
+		    	if(poptions.mel==-1)
+		    		poptions.mel=26;
+		    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+		    	ProgramOptions poptions2;
+		    	poptions2.fft_size = poptions.fft_size;
+		    	poptions2.take_half=poptions.take_half;
+		    	poptions2.mel=poptions.mel;
+		    	poptions2.apply_window = poptions.apply_window;
+		    	poptions2.window=poptions.window;
+		    	poptions2.filename=vm["input"].as<std::vector<std::string>>()[1];
+		    	SndCleaner sc1(&poptions);
+		    	SndCleaner sc2(&poptions2);
+		    	plot_byte_ratio(&sc1, &sc2);
+		    	return 0;
+		    }
+		    poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+    		SndCleaner sc(&poptions);
+    		test_spectrogram(&sc);
+    		//test_mask(&sc);
+    		//test_playback(&sc);
+    		//test_processing_functions(&sc);
+    		//test_lpc(&sc);
+    		return 0;
+    	}	
+    	
     	//test_bit_operations();
-    	//test_spectrogram(&sc);
-    	//test_mask(&sc);
-    	//test_playback(&sc);
-    	test_processing_functions(&sc);
+    	
+    	test_solver();
     	return 0;
     }
     if(!vm.count("input")) {

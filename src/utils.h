@@ -122,4 +122,8 @@ double compute_centroid(T* data, int len, int order){
 }
 
 
+double solve_linear(double* matrix, double* coefs, double* vector, const int dim);
+
+float solve_linearf(float* matrix, float* coefs, float* vector, const int dim);
+
 #endif

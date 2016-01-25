@@ -76,7 +76,7 @@ private:
 	int 			fft_size=0;
 	int 			window_type=WINDOW_RECT;
 	Spectrogram*	spectrogram=NULL;
-	double 			sampling=44100.0;
+	double 			sampling=-1;
 
 };
 

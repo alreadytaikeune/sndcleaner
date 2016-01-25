@@ -66,4 +66,24 @@ int apply_mask_to_bit_value(double** data, void* out, int out_byte_size, int w, 
 
 double root_mean_square(int16_t* data, int len);
 
+/*
+	Computes the p LPC coefficients on len samples of data. The array coefs should be at least of length p.
+*/
+double lpc_filter(int16_t* data, int len, int p, double* coefs);
+
+float lpc_filterf(int16_t* data, int len, int p, float* coefs);
+
+void autocorrelate(float Sn[], float Rn[], int Nsam, int order);
+
+void levinson_durbin(float R[],	float lpcs[], int order);
+
+
+void lpc_filter_optimized(int16_t Sn[], float a[], int Nsam, int order, float *E);
+
+float lpc_from_data(float *data,float *lpci,int n,int m);
+
+void inverse_filter(float Sn[], float a[], int Nsam, float res[], int order);
+
+void synthesis_filter(float res[], float a[], int Nsam, int order,float Sn_[]);
+
 #endif

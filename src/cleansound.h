@@ -12,4 +12,5 @@ void compute_bit_ratios(void* s1, void* s2,float* ratios, int byte_size, int nb_
 int find_time_occurences(float**occurrences, double** data1, double** data2, int mel_size, 
 	int c1, int c2, Mask* m, int fft_size, float sampling);
 
+
 #endif

@@ -128,6 +128,6 @@ private:
 	bool received_packets=false;
 	bool no_more_packets=false;
 	ProgramOptions* options;
-	unsigned long max_byte=-1;
-	unsigned long bytes_read=0;
+	long max_byte=-1;
+	long bytes_read=0;
 };

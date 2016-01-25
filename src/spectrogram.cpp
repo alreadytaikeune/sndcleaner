@@ -112,6 +112,65 @@ void Spectrogram::plot(){
 }
 
 
+/*
+	Won't work with mel
+*/
+void Spectrogram::plot_up_to(float max_hz, float sampling){
+	int max_idx = (int) max_hz/(sampling/2/data_size);
+	int w, h;
+	int x_step, y_step;
+	int rect_w, rect_h;
+	int i,j;
+	SDL_Rect r;
+	if(!initialized){
+		std::cerr << "not initialized for rendering" << std::endl;
+	}
+	SDL_GetWindowSize(window, &w, &h);
+	if(current_frame==0)
+		return;
+	x_step = current_frame/w;
+	if(x_step==0)
+		x_step=1;
+	rect_w= (float) w/current_frame;
+	if(rect_w==0)
+		rect_w=1;
+
+	y_step=max_idx/h;
+	if(y_step==0)
+		y_step=1;
+	rect_h=(float) h/max_idx;
+	if(rect_h==0)
+		rect_h=1;
+	r.w=(int)rect_w+1;
+	r.h=(int)rect_h+1;
+	std::cout << "current frame: " << current_frame << std::endl;
+	std::cout << "max_idx: " << max_idx << std::endl;
+	std::cout << "rect_w: " << rect_w << std::endl;
+	std::cout << "rect_h: " << rect_h << std::endl;
+	std::cout << "x_step: " << x_step << std::endl;
+	std::cout << "y_step: " << y_step << std::endl;
+	std::cout << "w: " << w << std::endl;
+	std::cout << "h: " << h << std::endl;
+	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+	// Clear window
+    SDL_RenderClear(renderer);
+    int grey=0;
+	for(i=0; i < current_frame; i+=x_step){
+		r.x=(int)(i/x_step)*rect_w;
+		for(j=0; j < max_idx; j+=y_step){
+			r.y=(int) (j/y_step)*rect_h;
+			grey = (int) ((data[i][j]/150000.)*255);
+			if(grey > 255)
+				grey=255;
+			SDL_SetRenderDrawColor(renderer, grey, grey, grey, 255);
+			SDL_RenderFillRect(renderer, &r);
+		}
+	}
+	SDL_RenderPresent(renderer);
+	SDL_Delay(5000);
+}
+
+
 void Spectrogram::plot_binarized_spectrogram(uint8_t** bin){
 	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 	// Clear window
@@ -155,7 +214,7 @@ int Spectrogram::initialize_for_rendering(){
 	window = SDL_CreateWindow("Spectrum",
                           SDL_WINDOWPOS_UNDEFINED,
                           SDL_WINDOWPOS_UNDEFINED,
-                          1000, 1000,
+                          1000, 500,
                           0);
   	if(!window){
   		std::cerr << "Could not create screen SDL: " << SDL_GetError() << std::endl;

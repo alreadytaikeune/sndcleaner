@@ -14,6 +14,7 @@ public:
 	int initialize_for_rendering();
 	SDL_Window* get_window();
 	void plot();
+	void plot_up_to(float max_hz, float sampling);
 	void plot_binarized_spectrogram(uint8_t** bin);
 	void dump_in_bmp(std::string filename);
 	void set_fft_size(int size);
