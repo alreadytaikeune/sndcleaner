@@ -18,6 +18,7 @@ extern "C" {
 #include "player.h"
 #include <pthread.h>
 #include "utils.h"
+#include <vector> // no especially useful though handy, may remove
 
 
 #define MAX_AUDIO_FRAME_SIZE 192000
@@ -86,6 +87,9 @@ public:
 		user, the destructor of the spectrogram takes care of it.
 	*/
 	void compute_spectrogram();
+	void compute_spectrogram(int reader);
+	std::vector<float>* compute_lpc(int reader);
+
 	void compute_mel_spectrogram();
 	int get_mel_size();
 	int get_fft_size();
@@ -101,6 +105,8 @@ public:
 	int get_max_byte();
 
 	int get_time_in_bytes(float sec);
+
+	int register_reader();
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 
 	// processing berfore storing in the data buffer. It induces a performance hit but may become handy.
@@ -127,6 +133,7 @@ private:
 	int stored_samples;
 	bool received_packets=false;
 	bool no_more_packets=false;
+	bool stream_opened=false;
 	ProgramOptions* options;
 	long max_byte=-1;
 	long bytes_read=0;

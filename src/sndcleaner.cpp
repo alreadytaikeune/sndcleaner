@@ -6,7 +6,6 @@
 #include <boost/program_options.hpp>
 #include "cleansound.h"
 #include <bitset>
-#include <vector> // no especially useful though handy, may remove
 #include "plotter.h"
 #include <sys/time.h>
 
@@ -45,6 +44,13 @@ typedef struct pthread_dump_arg{
 	int len;
 	SndCleaner* sc;
 } pthread_dump_arg;
+
+
+typedef struct lpc_thread_arg{
+	SndCleaner* sc;
+	float* errors;
+	int nb_errors;
+} lpc_thread_arg;
 
 
 template<typename T> void print_array(T* arr, int offset, int len){
@@ -245,6 +251,11 @@ SndCleaner::~SndCleaner(){
 
 
 void SndCleaner::open_stream(){
+	if(stream_opened){
+		stream_opened=true;
+		return;
+	}
+		
 	av_register_all();
 	char* filename = (char*) options->filename.c_str();
 	// Open video file
@@ -441,8 +452,7 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
   static AVFrame frame;
   static int count_in;
   // static int bytes_per_sample = av_get_bytes_per_sample(pCodecCtx->sample_fmt); // can be moved for optimization
-  static int bytes_per_sample = 2; // can be moved for optimization
-
+  static int bytes_per_sample = av_get_bytes_per_sample(conversion_out_format.sample_fmt); 
   int len1, data_size = 0;
   int nb_written = 0;
   for(;;) {
@@ -649,6 +659,13 @@ int SndCleaner::get_time_in_bytes(float sec){
 	return (int) (sec*conversion_out_format.sample_rate*av_get_bytes_per_sample(conversion_out_format.sample_fmt));
 }
 
+int SndCleaner::register_reader(){
+	int i = add_reader(data_buffer);
+	if(i==-1)
+		exit(EXIT_FAILURE);
+	return i;
+}
+
 
 template<typename T>
 void plotData(T* data, int len){
@@ -679,9 +696,12 @@ void plotData(T* data, int len){
 }
 
 
-
-
 void SndCleaner::compute_spectrogram(){
+	compute_spectrogram(0);
+}
+
+
+void SndCleaner::compute_spectrogram(int reader){
 	Spectrogram* s = new Spectrogram(options->fft_size); // s is destroyed in the spmanager's destructor
 	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
 		std::cerr << "impossible to register spectrogram" << std::endl;
@@ -691,7 +711,7 @@ void SndCleaner::compute_spectrogram(){
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
 	double* spectrum;
-	int count=0;
+	int total_read=0;
 	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
 		spectrum=(double*) malloc(sizeof(double)*(options->fft_size));
 		if(!spectrum)
@@ -700,9 +720,11 @@ void SndCleaner::compute_spectrogram(){
 
 		len=flen;
 		lread=0;
+		total_read=0;
 		while(len>0){
-			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data+total_read, reader, (size_t) len);
 			len-=lread;
+			total_read+=lread;
 			if(lread==0){
 				break;
 			}
@@ -712,12 +734,7 @@ void SndCleaner::compute_spectrogram(){
 		pthread_mutex_unlock(&data_writable_mutex); // Very important for the matching pthread_cond_wait() routine to complete
 		
 		spmanager->compute_spectrum(pulled_data, spectrum);
-		count++;
-		if(count >4000)
-			break;
-		//std::cout << "spectrum nb: " << count << std::endl;
 	}
-
 	free(pulled_data);
 }
 
@@ -725,7 +742,7 @@ void SndCleaner::compute_spectrogram(){
 
 void SndCleaner::compute_mel_spectrogram(){
 	if(!spmanager->is_mel_flag_set()){
-		std::cerr << "cannot compute spectrogram is flag mel unset in spmanager" << std::endl;
+		std::cerr << "cannot compute spectrogram if flag mel unset in spmanager" << std::endl;
 		exit(1);
 	}
 	Spectrogram* s = new Spectrogram(options->mel); // s is destroyed in the spmanager's destructor
@@ -737,7 +754,7 @@ void SndCleaner::compute_mel_spectrogram(){
 	int flen=(options->fft_size)*sizeof(int16_t);
 	int16_t* pulled_data = (int16_t *) malloc(flen);
 	double* spectrum;
-
+	int total_read=0;
 	while((rb_get_read_space(data_buffer, 0)>0 | !reached_end())){
 		spectrum=(double*) calloc(options->mel, sizeof(double)); // must be a calloc and not a malloc, because it is not zeroed out in the mel scale function, so the incrementation goes wrong
 		if(!spectrum)
@@ -748,9 +765,11 @@ void SndCleaner::compute_mel_spectrogram(){
 		// it is freed in the destructor, normally no memory leak
 		len=flen;
 		lread=0;
+		total_read=0;
 		while(len>0){
-			lread=rb_read(data_buffer, (uint8_t *) pulled_data+lread, 0, (size_t) len);
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data+total_read, 0, (size_t) len);
 			len-=lread;
+			total_read+=lread;
 			if(lread==0 && reached_end()){
 				//std::cout << "no more data" << std::endl;
 				break;
@@ -764,6 +783,91 @@ void SndCleaner::compute_mel_spectrogram(){
 
 	free(pulled_data);
 }
+
+
+void* spectrogram_thread(void* arg){
+	SndCleaner* sc = (SndCleaner*) arg;
+	sc->compute_spectrogram();
+}
+
+void* lpc_thread(void* args){
+	lpc_thread_arg* targs = (lpc_thread_arg*) args;
+	SndCleaner* sc = (SndCleaner*) targs->sc;
+	int reader = sc->register_reader();
+	sc->open_stream();
+	std::vector<float>* errors = sc->compute_lpc(reader);
+	targs->errors=(float*)&(*errors)[0];
+	targs->nb_errors=errors->size();
+}
+
+
+std::vector<float>* SndCleaner::compute_lpc(int reader){
+	float nb_milliseconds=10;
+	float nb_millis_overlap=0; 
+	float overlap=1-nb_millis_overlap/nb_milliseconds;
+	int p = 10;
+	int len,lread=0;
+	int window_size = get_time_in_bytes(nb_milliseconds/1000);
+	int overlap_size = get_time_in_bytes(nb_millis_overlap/1000);
+	int flen=window_size;
+	int16_t* pulled_data = (int16_t *) malloc(window_size);
+	float coefs[p+1];
+	std::vector<float>* errors = new std::vector<float>(0);
+	fill_buffer();
+	float error=0.;
+	while(1){
+		if(rb_get_read_space(data_buffer, reader)==0){
+			if(fill_buffer()<=0)
+				break;
+		}
+		len=flen;
+		lread=0;
+		while(len>0){
+			lread=rb_read_overlap(data_buffer, (uint8_t *) pulled_data, reader, (size_t) len, overlap); 
+			len-=lread;
+			if(lread==0 && fill_buffer()<=0){
+				break;
+			}
+		}
+		lpc_filter_optimized(pulled_data, coefs, window_size/2, p, &error);
+		errors->push_back(error);
+	}
+	free(pulled_data);
+	return errors;
+}
+
+void spectrogram_with_lpc(SndCleaner* sc){
+	lpc_thread_arg lpc_args;
+	lpc_args.sc=sc;
+	lpc_args.errors=NULL;
+	lpc_args.nb_errors=0;
+	sc->open_stream();
+
+	pthread_t t_lpc;
+	pthread_t t_spec;
+
+	pthread_create(&t_lpc,
+                   NULL,
+                   lpc_thread,
+                   (void *) &lpc_args);
+
+	pthread_create(&t_spec,
+                   NULL,
+                   spectrogram_thread,
+                   (void *) sc);
+
+	pthread_join(t_lpc, NULL);
+	pthread_join(t_spec, NULL);
+
+	Spectrogram* s = sc->spmanager->get_spectrogram();
+	int d1 = s->get_current_frame();
+	int d2 = 371; // 8kHz cropping
+	int l1 = lpc_args.nb_errors;
+	double** data = s->get_data();
+	plot_lpc_data("joint", data, d1, d2, lpc_args.errors, l1);
+
+}
+
 
 void test_bit_operations(){
 	int i1 = 0b00101010110000110010101011000011;
@@ -1144,13 +1248,12 @@ void test_processing_functions(SndCleaner* sc){
 
 void test_lpc(SndCleaner* sc){
 	sc->open_stream();
-	float nb_milliseconds=20;
-	float nb_millis_overlap=5; 
+	float nb_milliseconds=10;
+	float nb_millis_overlap=0; 
 	float overlap=1-nb_millis_overlap/nb_milliseconds;
 	int p = 10;
 	int len,lread=0;
 	int window_size = sc->get_time_in_bytes(nb_milliseconds/1000);
-	window_size=512;
 	int overlap_size = sc->get_time_in_bytes(nb_millis_overlap/1000);
 	int flen=window_size;
 	int16_t* pulled_data = (int16_t *) malloc(window_size);

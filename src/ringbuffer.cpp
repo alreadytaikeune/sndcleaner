@@ -158,3 +158,13 @@ void rb_free(RingBuffer* rb){
 	free(rb->m_readers);
 	free(rb);
 }
+
+int add_reader(RingBuffer* rb){
+	int n = rb->nb_readers;
+	rb->m_readers = (size_t *) realloc(rb->m_readers, (n+1)*sizeof(size_t));
+	if(!rb->m_readers)
+		return -1;
+	rb->nb_readers+=1;
+	rb->m_readers[n]=0;
+	return rb->nb_readers;
+}

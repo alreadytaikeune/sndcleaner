@@ -131,18 +131,18 @@ void Spectrogram::plot_up_to(float max_hz, float sampling){
 	x_step = current_frame/w;
 	if(x_step==0)
 		x_step=1;
-	rect_w= (float) w/current_frame;
+	rect_w= w/current_frame;
 	if(rect_w==0)
 		rect_w=1;
 
 	y_step=max_idx/h;
 	if(y_step==0)
 		y_step=1;
-	rect_h=(float) h/max_idx;
+	rect_h=h/max_idx;
 	if(rect_h==0)
 		rect_h=1;
-	r.w=(int)rect_w+1;
-	r.h=(int)rect_h+1;
+	r.w=rect_w;
+	r.h=rect_h;
 	std::cout << "current frame: " << current_frame << std::endl;
 	std::cout << "max_idx: " << max_idx << std::endl;
 	std::cout << "rect_w: " << rect_w << std::endl;
@@ -156,13 +156,23 @@ void Spectrogram::plot_up_to(float max_hz, float sampling){
     SDL_RenderClear(renderer);
     int grey=0;
 	for(i=0; i < current_frame; i+=x_step){
-		r.x=(int)(i/x_step)*rect_w;
+		r.x=(i/x_step)*rect_w;
 		for(j=0; j < max_idx; j+=y_step){
-			r.y=(int) (j/y_step)*rect_h;
+			r.y=(j/y_step)*rect_h;
 			grey = (int) ((data[i][j]/150000.)*255);
 			if(grey > 255)
 				grey=255;
 			SDL_SetRenderDrawColor(renderer, grey, grey, grey, 255);
+			SDL_RenderFillRect(renderer, &r);
+		}
+	}
+	for(i=0; i < current_frame; i+=x_step){
+		r.x=(i/x_step)*rect_w;
+		if(i/x_step % 10 == 0){
+			r.y=0;
+			r.h=h;
+			r.w=1;
+			SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
 			SDL_RenderFillRect(renderer, &r);
 		}
 	}
