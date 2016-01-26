@@ -252,10 +252,8 @@ SndCleaner::~SndCleaner(){
 
 void SndCleaner::open_stream(){
 	if(stream_opened){
-		stream_opened=true;
 		return;
 	}
-		
 	av_register_all();
 	char* filename = (char*) options->filename.c_str();
 	// Open video file
@@ -331,7 +329,7 @@ void SndCleaner::open_stream(){
 	av_opt_set_sample_fmt(swr, "in_sample_fmt",  conversion_in_format.sample_fmt, 0);
 	av_opt_set_sample_fmt(swr, "out_sample_fmt", conversion_out_format.sample_fmt,  0);
 	swr_init(swr);
-
+	stream_opened=true;	
 	//std::cout << "stream successfully opened" << std::endl;
 }
 
@@ -702,6 +700,7 @@ void SndCleaner::compute_spectrogram(){
 
 
 void SndCleaner::compute_spectrogram(int reader){
+	std::cout << "starting to compute spectrogram\n";
 	Spectrogram* s = new Spectrogram(options->fft_size); // s is destroyed in the spmanager's destructor
 	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
 		std::cerr << "impossible to register spectrogram" << std::endl;
@@ -794,7 +793,7 @@ void* lpc_thread(void* args){
 	lpc_thread_arg* targs = (lpc_thread_arg*) args;
 	SndCleaner* sc = (SndCleaner*) targs->sc;
 	int reader = sc->register_reader();
-	sc->open_stream();
+	std::cout << "reader successfully allocated at: " << reader << std::endl;
 	std::vector<float>* errors = sc->compute_lpc(reader);
 	targs->errors=(float*)&(*errors)[0];
 	targs->nb_errors=errors->size();
@@ -802,6 +801,7 @@ void* lpc_thread(void* args){
 
 
 std::vector<float>* SndCleaner::compute_lpc(int reader){
+	std::cout << "starting to compute lpc\n";
 	float nb_milliseconds=10;
 	float nb_millis_overlap=0; 
 	float overlap=1-nb_millis_overlap/nb_milliseconds;
@@ -860,6 +860,8 @@ void spectrogram_with_lpc(SndCleaner* sc){
 	pthread_join(t_spec, NULL);
 
 	Spectrogram* s = sc->spmanager->get_spectrogram();
+	s->initialize_for_rendering();
+	s->plot_up_to(8000, sc->get_sampling());
 	int d1 = s->get_current_frame();
 	int d2 = 371; // 8kHz cropping
 	int l1 = lpc_args.nb_errors;
@@ -1351,7 +1353,8 @@ int main(int argc, char *argv[]) {
 		    }
 		    poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
     		SndCleaner sc(&poptions);
-    		test_spectrogram(&sc);
+    		//test_spectrogram(&sc);
+    		spectrogram_with_lpc(&sc);
     		//test_mask(&sc);
     		//test_playback(&sc);
     		//test_processing_functions(&sc);

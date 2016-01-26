@@ -166,5 +166,5 @@ int add_reader(RingBuffer* rb){
 		return -1;
 	rb->nb_readers+=1;
 	rb->m_readers[n]=0;
-	return rb->nb_readers;
+	return n;
 }
