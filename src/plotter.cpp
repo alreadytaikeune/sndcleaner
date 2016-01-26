@@ -93,9 +93,9 @@ void plot_color_map2(SDL_Renderer* renderer, double** data, int d1, int d2, int 
 	int xnext;
 	int ynext;
 	for(i=0; i < d1; i+=x_step){
-		r.x=(int) (i/x_step)*rect_w;
-		// xnext=(int) (i/x_step+1)*rect_wf;
-		// r.w=xnext-r.x;
+		r.x=(int) (i/x_step)*rect_wf;
+		xnext=(int) (i/x_step+1)*rect_wf;
+		r.w=xnext-r.x;
 		for(j=0; j < d2-1; j+=y_step){
 			r.y=(int) (j/y_step)*rect_h;
 			//ynext = (int) (j/y_step+1)*rect_hf;
@@ -170,4 +170,21 @@ void plot_lpc_data(std::string filename, double** data, int d1, int d2, float* l
     SDL_Delay(5000);
 	dump_in_bmp(filename, window, renderer);
 	SDL_Quit();
+}
+
+void plfbox(PLFLT x0, PLFLT y0){
+    PLFLT x[4], y[4];
+
+    x[0] = x0;
+    y[0] = 0.;
+    x[1] = x0;
+    y[1] = y0;
+    x[2] = x0 + 1.;
+    y[2] = y0;
+    x[3] = x0 + 1.;
+    y[3] = 0.;
+    plfill( 4, x, y );
+    plcol0( 1 );
+    pllsty( 1 );
+    plline( 4, x, y );
 }
