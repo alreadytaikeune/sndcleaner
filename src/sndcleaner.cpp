@@ -8,6 +8,7 @@
 #include <bitset>
 #include "plotter.h"
 #include <sys/time.h>
+#include "file_set.h"
 
 
 namespace po = boost::program_options;
@@ -1230,6 +1231,15 @@ void test_solver(){
 
 }
 
+void test_file_set(){
+	FileSet f("./data", true);
+	FileSetIterator it=f.begin();
+	FileSetIterator end=f.end();
+	for(;it!=end;++it){
+		std::cout << *it << std::endl;
+	}
+}
+
 
 int main(int argc, char *argv[]) {
 	ProgramOptions poptions;
@@ -1287,7 +1297,7 @@ int main(int argc, char *argv[]) {
 		    poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
     		SndCleaner sc(&poptions);
     		//test_spectrogram(&sc);
-    		spectrogram_with_lpc(&sc);
+    		//spectrogram_with_lpc(&sc);
     		//test_mask(&sc);
     		//test_playback(&sc);
     		//test_processing_functions(&sc);
@@ -1297,7 +1307,8 @@ int main(int argc, char *argv[]) {
     	
     	//test_bit_operations();
     	
-    	test_solver();
+    	//test_solver();
+    	test_file_set();
     	return 0;
     }
     if(!vm.count("input")) {
