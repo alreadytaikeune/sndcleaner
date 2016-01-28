@@ -9,6 +9,7 @@
 #include "plotter.h"
 #include <sys/time.h>
 #include "file_set.h"
+#include "distribution.h"
 
 
 namespace po = boost::program_options;
@@ -833,7 +834,7 @@ void spectrogram_with_lpc(SndCleaner* sc){
 
 	Spectrogram* s = sc->spmanager->get_spectrogram();
 	s->initialize_for_rendering();
-	s->plot_up_to(8000, sc->get_sampling());
+	//s->plot_up_to(8000, sc->get_sampling());
 	int d1 = s->get_current_frame();
 	int d2 = 371; // 8kHz cropping
 	int l1 = lpc_args.nb_errors;
@@ -1116,7 +1117,7 @@ void test_processing_functions(SndCleaner* sc){
 	int window_size = sc->get_time_in_bytes(nb_milliseconds/1000);
 	std::cout << "window size: " << window_size << std::endl;
 	if(size=-1){
-		size=sc->get_time_in_bytes(3); // 3
+		size=sc->get_time_in_bytes(30);
 	}
 	int total_read=0;
 	int flen=window_size;
@@ -1224,13 +1225,6 @@ void test_lpc(SndCleaner* sc){
 }
 
 
-void test_solver(){
-	const int p=2;
-	const int n=4;
-	float data[n];
-
-}
-
 void test_file_set(){
 	FileSet f("./data", true);
 	FileSetIterator it=f.begin();
@@ -1238,6 +1232,123 @@ void test_file_set(){
 	for(;it!=end;++it){
 		std::cout << *it << std::endl;
 	}
+}
+
+/*
+	For now only works with same local window sizes.
+	TODO: allow for different local window sizes by declaring the 
+	size of the pulled_data buffer as the smallest common multiple 
+	of the window sizes, are dealing separately with each feature.
+
+
+*/
+void compute_features(SndCleaner* sc){
+	sc->open_stream();
+	float global_wdw_sz=2000;
+	float local_wdw_sz=20; 
+	float overlap=0;
+
+	// number of local windows to make a global one
+	int nb_frames_global=(int) global_wdw_sz/(local_wdw_sz*(1-overlap));
+	// how many local windows have we stacked so far
+	int nb_frames_current=0;
+
+	std::cout << "nb frames global: " << nb_frames_global << std::endl;
+	int len,lread=0;
+	int p=10;
+	int size=sc->get_time_in_bytes(local_wdw_sz/1000);
+	int16_t* pulled_data = (int16_t *) malloc(size);
+
+	int flen=size;
+	float error=0.;
+	float coefs[p+1];
+	
+	std::vector<double> rms_vector(0);
+	std::vector<double> zc_vector(0);
+	std::vector<float> lpc_vector(0);
+
+	std::vector<distribution*> rms_distribs(0);
+	std::vector<distribution*> zc_distribs(0);
+	std::vector<distribution*> lpc_distribs(0);
+
+	// pointers on the current distributions
+	distribution* rms_distrib;
+	distribution* zc_distrib;
+	distribution* lpc_distrib;
+
+	int rms_res=20;
+	int zc_res=20;
+	int lpc_res=20;
+	RingBuffer* data_buffer = sc->data_buffer;
+	sc->fill_buffer();
+
+	while(1){
+		//std::cout << rb_get_read_space(data_buffer, 0) << std::endl;
+		
+		if(nb_frames_current >= nb_frames_global){
+			double rms_max=max_abs(&rms_vector[0], nb_frames_current);
+			rms_distrib=dist_alloc(rms_res, rms_max);
+			dist_incrementd(rms_distrib, &rms_vector[0], nb_frames_current);
+			rms_distribs.push_back(rms_distrib);
+
+			double zc_max=max_abs(&zc_vector[0], nb_frames_current);
+			zc_distrib=dist_alloc(zc_res, zc_max);
+			dist_incrementd(zc_distrib, &zc_vector[0], nb_frames_current);
+			zc_distribs.push_back(zc_distrib);
+
+			double lpc_max=(double) max_abs(&lpc_vector[0], nb_frames_current);
+			lpc_distrib=dist_alloc(lpc_res, lpc_max);
+			dist_incrementf(lpc_distrib, &lpc_vector[0], nb_frames_current);
+			lpc_distribs.push_back(lpc_distrib);
+
+			nb_frames_current=0;
+			rms_vector.clear();
+			zc_vector.clear();
+			lpc_vector.clear();
+		}
+		if(rb_get_read_space(data_buffer, 0)==0){
+			if(sc->fill_buffer() <=0)
+				break;
+		}
+
+		len=flen;
+		lread=0;
+		while(len>0){
+			// the cast only affects pulled_data so we can safely add lread without pointer arithmetic error
+			//lread=rb_read_overlap(data_buffer, (uint8_t *) pulled_data, 0, (size_t) len, overlap); 
+			lread=rb_read(data_buffer, (uint8_t *) pulled_data, 0, (size_t) len); 
+			
+			len-=lread;
+			if(lread==0 && sc->fill_buffer()<=0){
+				break;
+			}
+		}
+		rms_vector.push_back(root_mean_square(pulled_data, (flen-len)/2));
+		zc_vector.push_back(zero_crossing_rate(pulled_data, (flen-len)/2));
+		lpc_filter_optimized(pulled_data, coefs, size/2, p, &error);
+		lpc_vector.push_back(error);
+		nb_frames_current++;
+	}
+	std::cout << "rms" << std::endl;
+	for(std::vector<distribution*>::iterator it=rms_distribs.begin();
+		it!=rms_distribs.end();++it){
+		dist_print(*it);
+		dist_free(*it);
+	}
+	std::cout << "zc" << std::endl;
+	for(std::vector<distribution*>::iterator it=zc_distribs.begin();
+		it!=zc_distribs.end();++it){
+		dist_print(*it);
+		dist_free(*it);
+	}
+	std::cout << "lpc" << std::endl;
+	for(std::vector<distribution*>::iterator it=lpc_distribs.begin();
+		it!=lpc_distribs.end();++it){
+		dist_print(*it);
+		dist_free(*it);
+	}
+
+	free(pulled_data);
 }
 
 
@@ -1302,13 +1413,14 @@ int main(int argc, char *argv[]) {
     		//test_playback(&sc);
     		//test_processing_functions(&sc);
     		//test_lpc(&sc);
+    		compute_features(&sc);
     		return 0;
     	}	
     	
     	//test_bit_operations();
     	
     	//test_solver();
-    	test_file_set();
+    	//test_file_set();
     	return 0;
     }
     if(!vm.count("input")) {
