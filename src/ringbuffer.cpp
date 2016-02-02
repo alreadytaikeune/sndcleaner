@@ -55,6 +55,28 @@ size_t rb_read(RingBuffer *rb, uint8_t* target, int r, size_t nb){
 	}
 }
 
+size_t rb_skip(RingBuffer* rb, size_t to_skip, int r){
+	size_t available = rb_get_read_space(rb, r);
+	if(available <= 0)
+		return 0;
+	else{
+		if(to_skip > available){
+			//std::cout << "Warning: trying to read " << nb << " bytes from ring buffer but only " << available << " available" << std::endl;
+			to_skip = available;
+		}
+		rb->m_readers[r] = (rb->m_readers[r] + to_skip)%rb->m_size;
+		return to_skip;
+	}
+}
+
+void rb_reset(RingBuffer* rb){
+	rb->m_writer=0;
+	int i=0;
+	for(i=0;i<rb->nb_readers;i++){
+		rb->m_readers[i]=0;
+	}
+}
+
 size_t rb_read_overlap(RingBuffer *rb, uint8_t* target, int r, size_t nb, float overlap){
 	size_t available = rb_get_read_space(rb, r);
 	int to_increment=(int) nb*overlap;

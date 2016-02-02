@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include "file_set.h"
 #include "distribution.h"
+#include "trainer.h"
 
 
 namespace po = boost::program_options;
@@ -179,7 +180,7 @@ SndCleaner::SndCleaner(ProgramOptions* op){
 		options = (ProgramOptions*) malloc(sizeof(ProgramOptions));
 	else
 		options = op;
-	print_options(options);
+	//print_options(options);
 	packet_queue_init(&audioq, PACKET_QUEUE_MAX_NB);
 	audioStreamId=-1;
 	conversion_out_format.sample_fmt = AV_SAMPLE_FMT_S16;
@@ -333,6 +334,10 @@ void SndCleaner::open_stream(){
 	swr_init(swr);
 	stream_opened=true;	
 	//std::cout << "stream successfully opened" << std::endl;
+	if(options->skip_time != -1){
+		int a = skip_seconds(options->skip_time);
+		std::cout << a << " bytes skipped" << std::endl;
+	}
 }
 
 
@@ -524,21 +529,34 @@ void* sc_read_frames(void* thread_arg){
 
 
 int SndCleaner::fill_buffer(){
+	//std::cout << "trying to acquire lock to fill" << std::endl;
 	pthread_mutex_lock(&data_writable_mutex);
+
+	//std::cout << "lock acquired" << std::endl;
 	int to_write = rb_get_write_space(data_buffer);
 	int lread=0, len_written=0;
 	fill_packet_queue();
-	if(to_write > max_byte)
-		to_write=max_byte;
-	while(to_write>0){
-		if(max_byte<=0){
-			break;
+	bool check_max=false;
+	if(max_byte != -1){
+		check_max=true;
+		if(to_write > max_byte)
+			to_write=max_byte;
+	}
+	
+	while(to_write>len_written){
+		if(check_max){
+			if(max_byte<=0){
+				break;
+			}
+
+			if(to_write > max_byte){
+				to_write = max_byte;
+			}
 		}
-		if(to_write > max_byte){
-			to_write = max_byte;
-		}
+		
 		lread=dump_queue(to_write);
-		max_byte-=lread;
+		if(check_max)
+			max_byte-=lread;
 		len_written+=lread;
 		if(lread==0){
 			if(fill_packet_queue() == -1){
@@ -552,6 +570,19 @@ int SndCleaner::fill_buffer(){
 	return len_written;
 }
 
+
+int SndCleaner::skip_seconds(float seconds){
+	int bytes_to_skip=get_time_in_bytes(seconds);
+	int skipped=0;
+	fill_packet_queue();
+	while(skipped<bytes_to_skip){
+		skipped+=dump_queue(bytes_to_skip-skipped);
+		if(rb_get_write_space(data_buffer)==0)
+			rb_reset(data_buffer);
+	}
+	rb_reset(data_buffer);
+	return skipped;
+}
 
 /*
 *	Continually dump frames until no more available, or quit event from the player
@@ -606,9 +637,7 @@ void* sc_dump_frames(void* thread_arg){
     	// while(rb_get_max_read_space(sc->data_buffer)>0){
     	// 	// Should do better an implement a kind of worker thread waiter capability
     	// }
-    }
-
-    
+    } 
     //sc->player->quit_all();
     swr_free(&(sc->swr));
 }
@@ -666,6 +695,9 @@ int SndCleaner::register_reader(){
 	return i;
 }
 
+std::string SndCleaner::get_filename(){
+	return options->filename;
+}
 
 void SndCleaner::compute_spectrogram(){
 	compute_spectrogram(0);
@@ -1225,8 +1257,8 @@ void test_lpc(SndCleaner* sc){
 }
 
 
-void test_file_set(){
-	FileSet f("./data", true);
+void test_file_set(std::string path){
+	FileSet f(path, true);
 	FileSetIterator it=f.begin();
 	FileSetIterator end=f.end();
 	for(;it!=end;++it){
@@ -1315,7 +1347,7 @@ void compute_features(SndCleaner* sc){
 		lread=0;
 		while(len>0){
 			// the cast only affects pulled_data so we can safely add lread without pointer arithmetic error
-			//lread=rb_read_overlap(data_buffer, (uint8_t *) pulled_data, 0, (size_t) len, overlap); 
+			// lread=rb_read_overlap(data_buffer, (uint8_t *) pulled_data, 0, (size_t) len, overlap); 
 			lread=rb_read(data_buffer, (uint8_t *) pulled_data, 0, (size_t) len); 
 			
 			len-=lread;
@@ -1352,9 +1384,17 @@ void compute_features(SndCleaner* sc){
 }
 
 
+void launch_training(std::string data_path, std::string label, ProgramOptions& op){
+	Trainer t = Trainer(data_path, label, op);
+	t.compute_all_features();
+}
+
+
 int main(int argc, char *argv[]) {
 	ProgramOptions poptions;
 	bool test=false;
+	bool train=false;
+	std::string label="";
   	po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
@@ -1365,9 +1405,12 @@ int main(int argc, char *argv[]) {
     	("apply-window,w", po::bool_switch(&poptions.apply_window), "should an windowing function be applied")
     	("window-type", po::value(&poptions.window), "the windowing function to apply.\n\t1: rectangular\n\t2: blackmann\n\t4: hanning\n\t8: hamming")
      	("mel", po::value(&poptions.mel), "If set, the spectrum will be converted to mel scale with the specified number of windows")
-        ("test", po::bool_switch(&test)->default_value(false), "run tests")
+        ("test,t", po::bool_switch(&test)->default_value(false), "run tests")
   		("find", po::bool_switch()->default_value(false), "tries to find arg1, in arg2")
   		("max", po::value(&poptions.max_time), "the maximum number of seconds to take into account")
+    	("train", po::bool_switch(&train), "launches a training session")
+    	("label", po::value(&label), "label to associate with the training")
+    	("skip", po::value(&poptions.skip_time), "number of seconds to skip at the beginning")
     ;
 
 	po::positional_options_description p;
@@ -1378,12 +1421,33 @@ int main(int argc, char *argv[]) {
 	          options(desc).positional(p).run(), vm);
 	po::notify(vm);
 
+
 	if(vm.count("help")) {
 		std::cout << desc << "\n";
 		return 0;
     }
 
+    if(train){
+    	launch_training(vm["input"].as<std::vector<std::string>>()[0], 
+    		label, poptions);
+    	return 0;
+    }
+
+    if(poptions.with_playback){
+    	poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
+    	SndCleaner sc(&poptions);
+    	test_playback(&sc);
+    	return 0;
+    }
+
     if(test){
+        if(vm.count("input")){
+    		test_file_set(vm["input"].as<std::vector<std::string>>()[0]);
+    	}
+    	else{
+    		test_file_set(".");
+    	}
+    	return 0;
     	if(vm.count("input")){
 	    	if(vm["input"].as<std::vector<std::string>>().size()==2){
 		    	if(poptions.with_playback){
@@ -1407,21 +1471,20 @@ int main(int argc, char *argv[]) {
 		    }
 		    poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
     		SndCleaner sc(&poptions);
-    		//test_spectrogram(&sc);
-    		//spectrogram_with_lpc(&sc);
-    		//test_mask(&sc);
-    		//test_playback(&sc);
-    		//test_processing_functions(&sc);
-    		//test_lpc(&sc);
-    		compute_features(&sc);
+    		// test_spectrogram(&sc);
+    		// spectrogram_with_lpc(&sc);
+    		// test_mask(&sc);
+    		// test_playback(&sc);
+    		// test_processing_functions(&sc);
+    		// test_lpc(&sc);
+    		// compute_features(&sc);
     		return 0;
     	}	
     	
     	//test_bit_operations();
     	
     	//test_solver();
-    	//test_file_set();
-    	return 0;
+  
     }
     if(!vm.count("input")) {
     	std::cout << "YOU MUST SPECIFY AN INPUT FILE" << "\n";
@@ -1456,6 +1519,7 @@ int main(int argc, char *argv[]) {
 			return 0;
 	    }
     }
+
     std::cout << "inputs: " << vm.count("input") << std::endl;
    
 	

@@ -1,3 +1,5 @@
+#ifndef _SNDCLEANER_H_
+#define _SNDCLEANER_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,6 +55,7 @@ typedef struct ProgramOptions{
 	int window=WINDOW_BLACKMAN;
 	int mel=-1;
 	int max_time=-1;
+	int skip_time=-1;
 } ProgramOptions;
 
 
@@ -76,6 +79,7 @@ public:
 	bool get_player_quit();
 	void start_playback();
 	bool supports_playback();
+	int skip_seconds(float seconds); // returns the number of bytes skipped
 
 
 	/*
@@ -94,6 +98,8 @@ public:
 	int get_mel_size();
 	int get_fft_size();
 	int get_sampling();
+
+	std::string get_filename();
 
 	/*
 		Fills the data buffer as much as possible. Returns the number of bytes written. It is equal to
@@ -138,3 +144,5 @@ private:
 	long max_byte=-1;
 	long bytes_read=0;
 };
+
+#endif

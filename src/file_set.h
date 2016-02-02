@@ -17,14 +17,14 @@ typedef struct iterator_stack{
 } iterator_stack;
 
 
-void is_init(iterator_stack* is){
+inline void is_init(iterator_stack* is){
 	is->it=NULL;
 	is->stack=NULL;
 }
 
 
 
-int is_pop(iterator_stack** is, bf::directory_iterator** it){
+inline int is_pop(iterator_stack** is, bf::directory_iterator** it){
 	if(!is)
 		return -1;
 	*it=(*is)->it;
@@ -37,14 +37,14 @@ int is_pop(iterator_stack** is, bf::directory_iterator** it){
 }
 
 
-int is_peek(iterator_stack* is, bf::directory_iterator** it){
+inline int is_peek(iterator_stack* is, bf::directory_iterator** it){
 	if(!is)
 		return -1;
 	*it=is->it;
 	return 0;
 }
 
-void is_put(iterator_stack** is, bf::directory_iterator* it){
+inline void is_put(iterator_stack** is, bf::directory_iterator* it){
 	std::cout << "put in " << *is << " iterator at: " << it << std::endl;
 	iterator_stack* tmp = (iterator_stack*) malloc(sizeof(iterator_stack)); // freed in pop
 	tmp->stack=*is;
@@ -54,7 +54,7 @@ void is_put(iterator_stack** is, bf::directory_iterator* it){
 }
 
 
-bool is_is_empty(iterator_stack* is, bf::directory_iterator end_itr){
+inline bool is_is_empty(iterator_stack* is, bf::directory_iterator end_itr){
 	return is==NULL;
 }
 
@@ -150,21 +150,40 @@ class FileSetIterator : boost::iterator_facade<bf::directory_iterator, std::stri
    		// Post-increment
 	    FileSetIterator operator++ (int) 
 	    {
-	    	while(is_peek(is, &itr) >= 0){
+	    	bool to_pop=true;
+			while(is_peek(is, &itr) >= 0){
+				to_pop=true;
+				//std::cout << "head is " << (*itr)->path() << std::endl;
 				// depth search strategy
-				while(*itr != end_itr){
-					(*itr)++;
+				while(*itr!=end_itr){
 					if(is_directory((*itr)->status()) && recursive){
-
+						std::cout << "directory: " << (*itr)->path() << std::endl; 
 						is_put(&is, new bf::directory_iterator((*itr)->path()));
+						(*itr)++;
+						to_pop=false;
 						break; // go to the previous while loop and deal with this directory
 					}
+					else if(is_directory((*itr)->status())){
+						(*itr)++;
+						continue;
+					}
+					(*itr)++;
+					if(*itr==end_itr){
+						to_pop=true;
+						break;
+					}
+						
 					return *this;
 				}
-				is_pop(&is, &itr);
-				delete itr;
-			}
-	        return *this; 
+				
+				if(to_pop){ 
+					is_pop(&is, &itr);
+					delete itr;
+				}
+				
+			}	
+			*itr=end_itr;
+	        return *this;
 	    }
 
 	    bool operator== (const FileSetIterator& other) const{
@@ -194,10 +213,29 @@ class FileSetIterator : boost::iterator_facade<bf::directory_iterator, std::stri
 
 class FileSet{
 	public:
+		FileSet(){
+			root_path = bf::path("\0");
+			recursive=false;
+		}
+
 		FileSet(const bf::path & dir_path, bool rec){
+			if(!is_directory(dir_path)){
+				std::cerr << "File set argument must be a directory" << std::endl;
+				exit(1);
+			}
 			root_path=dir_path;
 			recursive=rec;
 		}
+
+		FileSet(const char * dir_path, bool rec){
+			root_path=bf::path(dir_path);
+			if(!is_directory(root_path)){
+				std::cerr << "File set argument must be a directory" << std::endl;
+				exit(1);
+			}
+			recursive=rec;
+		}
+
 		FileSetIterator begin(){
 			bf::path &arg=root_path;
 			FileSetIterator f(arg, recursive);

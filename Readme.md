@@ -7,4 +7,10 @@ Usage:
 	Where the ringbuffer is full, it will wait for the data_available signal. Your read function when performing a read should signal
 	availability for writing by calling this signal, otherwise, the write will block indefinitely. 
 	
+the compiler must support the nan predicate x != x
 
+Launch spectrum visualisation with playback:
+	./bin/sndcleaner path/to/data (--max n) (-w --window-type m) --with-playback
+
+Launch a training session:
+	./bin/sndcleaner data/train/speech/ --label speech --skip 10 --train --max 60

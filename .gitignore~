@@ -1,2 +1,6 @@
 *.o
 data/*
+*.bmp
+*.pyc
+train/music/*
+train/speech/*

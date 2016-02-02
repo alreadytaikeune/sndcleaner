@@ -95,3 +95,6 @@ int find_time_occurences(float** occurrences, double** data1, double** data2, in
 	free(indices);
 	return nb;
 }
+
+
+

@@ -27,4 +27,6 @@ void   print_buffer_stats(RingBuffer* rb);
 size_t rb_get_max_read_space(RingBuffer* rb);
 void   rb_free(RingBuffer* rb);
 int    add_reader(RingBuffer* rb);
+size_t rb_skip(RingBuffer* rb, size_t to_skip, int reader);
+void   rb_reset(RingBuffer* rb);
 #endif /* RINGBUFFER_H */
