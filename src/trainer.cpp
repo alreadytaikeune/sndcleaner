@@ -3,6 +3,7 @@
 #include <iostream>
 #include "processor.h"
 #include <fstream>
+#include "libsvm/svm.h"
 
 Trainer::Trainer(std::string data_path, std::string lab, ProgramOptions& op){
 	label=lab;
@@ -17,7 +18,7 @@ void Trainer::compute_all_features(){
 	SndCleaner* sc;
 	std::ostream stream(nullptr);
 	std::ofstream out_file;
-	out_file.open("./tests/"+ label + ".txt", std::ofstream::out | std::ofstream::app);
+	out_file.open("./tests/"+ label + ".txt", std::ofstream::out);
 	stream.rdbuf(std::cout.rdbuf());
 	std::vector<Features*> features_vector(0);
 	for(;it!=end;++it){
@@ -45,7 +46,7 @@ void Trainer::compute_all_features(){
 void Trainer::compute_features(SndCleaner* sc, std::vector<Features*>& features_vector){
 	std::cout << "computing features of " << sc->get_filename() << std::endl;
 	sc->open_stream();
-	float global_wdw_sz=3000;
+	float global_wdw_sz=1000;
 	float local_wdw_sz=20;
 	float overlap=0;
 

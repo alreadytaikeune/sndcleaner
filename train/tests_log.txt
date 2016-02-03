@@ -1,0 +1,60 @@
+=======================
+Window size: 3sec
+training proportion: 80%
+rms_res=5
+zc_res=5
+lpc_res=10
+rms_crop=5
+zc_crop=5
+lpc_crop=5
+speech skip 10 max 40
+music skip 20 max 30
+speech correct: 0.862745098039
+music correct: 0.964285714286
+========================
+Window size: 3sec
+training proportion: 80%
+rms_res=5
+zc_res=5
+lpc_res=10
+rms_crop=5
+zc_crop=5
+lpc_crop=5
+speech skip 60 max 60
+music skip 60 max 60
+speech correct: 0.946564885496
+music correct: 0.953757225434
+=======================
+Window size: 2sec
+training proportion: 80%
+rms_res=5
+zc_res=5
+lpc_res=10
+rms_crop=5
+zc_crop=5
+lpc_crop=5
+speech skip 60 max 60
+music skip 60 max 60
+speech correct: 0.925925925926
+music correct: 0.983935742972
+=======================
+Window size: 1sec
+training proportion: 80%
+rms_res=5
+zc_res=5
+lpc_res=10
+rms_crop=5
+zc_crop=5
+lpc_crop=5
+speech skip 60 max 60
+music skip 60 max 60
+speech correct: 0.864864864865
+music correct: 0.929718875502
+=======================
+
+
+
+
+
+
+

@@ -6,7 +6,7 @@ from sklearn.decomposition import PCA
 from sklearn import svm
 from sklearn.cross_validation import train_test_split
 
-df = pd.read_csv("train.csv", sep=" ", header=None)
+df = pd.read_csv("train3.csv", sep=" ", header=None)
 print len(df)
 
 
@@ -43,17 +43,15 @@ print(pca.n_components_)
 print(pca.explained_variance_ratio_)
 tX_train=pca.transform(X_train)
 tX_test=pca.transform(X_test)
+#~ tX_train=X_train
+#~ tX_test=X_test
 
 
 clf = svm.SVC()
 clf.fit(tX_train, y_train)
 
 pred=clf.predict(tX_test)
-print pred
-print y_test
 plt.figure(0)
-print len(y_test)
-print len(pred)
 for k in range(len(pred)):
 	if pred[k]=="music":
 		music_nb+=1
