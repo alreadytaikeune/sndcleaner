@@ -24,7 +24,7 @@ void dist_set_norm(distribution* d, double norm){
 
 
 void dist_incrementi16(distribution* d, int16_t* data, int len){
-	assert(d->N >= 0);
+	assert(d->N > 0);
 	int idx;
 	int r=d->res;
 	for(int i=0; i<len; i++){
@@ -39,7 +39,7 @@ void dist_incrementi16(distribution* d, int16_t* data, int len){
 
 
 void dist_incrementi(distribution* d, int* data, int len){
-	assert(d->N >= 0);
+	assert(d->N > 0);
 	int idx;
 	int r=d->res;
 	for(int i=0; i<len; i++){
@@ -53,7 +53,7 @@ void dist_incrementi(distribution* d, int* data, int len){
 }
 
 void dist_incrementf(distribution* d, float* data, int len){
-	assert(d->N >= 0);
+	assert(d->N > 0);
 	int idx;
 	int r=d->res;
 	for(int i=0; i<len; i++){
@@ -67,7 +67,7 @@ void dist_incrementf(distribution* d, float* data, int len){
 }
 
 void dist_incrementd(distribution* d, double* data, int len){
-	assert(d->N >= 0);
+	assert(d->N > 0);
 	int idx;
 	int r=d->res;
 	for(int i=0; i<len; i++){
@@ -86,6 +86,12 @@ void dist_to_percentage(distribution* d, float per[]){
 		per[i] = (float) d->counters[i]/d->total;
 	}
 }
+
+double dist_get_ratio(distribution* d, int r){
+	assert(d->total > 0);
+	return (double) d->counters[r]/d->total;
+}
+
 
 void dist_print(distribution* d){
 	printf("========================\n");

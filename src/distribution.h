@@ -31,7 +31,8 @@ void dist_to_percentage(distribution* d, float per[]);
 
 void dist_print(distribution* d);
 
-
 void dist_free(distribution* d);
+
+double dist_get_ratio(distribution* d, int r);
 
 #endif

@@ -29,7 +29,7 @@ extern "C" {
 #define OUT_SAMPLE_RATE  44100
 #define DATA_BUFFER_SIZE SECONDS_IN_BUFFER*OUT_SAMPLE_RATE*2
 #define STREAM_BUFFER_SIZE 1152*2*4
-#define PACKET_QUEUE_MAX_NB 5000
+#define PACKET_QUEUE_MAX_NB 1
 
 typedef struct PacketQueue {
   AVPacketList *first_pkt, *last_pkt;
@@ -80,7 +80,7 @@ public:
 	void start_playback();
 	bool supports_playback();
 	int skip_seconds(float seconds); // returns the number of bytes skipped
-
+	void reset(std::string f);
 
 	/*
 		Computes the spectrogram by reading as much as possible from the data buffer. This function can
@@ -118,7 +118,7 @@ public:
 	// processing berfore storing in the data buffer. It induces a performance hit but may become handy.
 	//int16_t *data_buffer = (int16_t *) malloc(DATA_BUFFER_SIZE*sizeof(int16_t)); // Allocate in the heap
 	RingBuffer* data_buffer = (RingBuffer *) malloc(sizeof(RingBuffer));
-	SwrContext *swr; // the resampling context for outputting with standard format in data_buffer
+	SwrContext *swr=NULL; // the resampling context for outputting with standard format in data_buffer
 	Player* player=NULL;
 	pthread_mutex_t data_writable_mutex;
 	// Condition for write availability in the data buffer not to do busy wait

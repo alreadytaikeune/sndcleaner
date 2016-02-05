@@ -5,6 +5,7 @@
 #include "boost/filesystem.hpp"
 #include <iterator>
 #include <iostream>
+#include <cstddef>
 
 namespace bf=boost::filesystem;
 
@@ -109,6 +110,16 @@ class FileSetIterator : boost::iterator_facade<bf::directory_iterator, std::stri
 			}
 		}
 
+
+		std::string find_last_dir(const std::string& str){
+			std::size_t found = str.find_last_of("/\\");
+			return str.substr(found+1);
+		}
+
+		std::string get_parent_name(){
+			return find_last_dir(((*itr)->path()).parent_path().string());
+		}
+
 		// Pre-increment
 		FileSetIterator& operator++(){
 			bool to_pop=true;
@@ -143,54 +154,33 @@ class FileSetIterator : boost::iterator_facade<bf::directory_iterator, std::stri
 				}
 				
 			}	
-			*itr=end_itr;
+			itr=&end_itr;
 	        return *this;
    		}
 
    		// Post-increment
 	    FileSetIterator operator++ (int) 
 	    {
-	    	bool to_pop=true;
-			while(is_peek(is, &itr) >= 0){
-				to_pop=true;
-				//std::cout << "head is " << (*itr)->path() << std::endl;
-				// depth search strategy
-				while(*itr!=end_itr){
-					if(is_directory((*itr)->status()) && recursive){
-						std::cout << "directory: " << (*itr)->path() << std::endl; 
-						is_put(&is, new bf::directory_iterator((*itr)->path()));
-						(*itr)++;
-						to_pop=false;
-						break; // go to the previous while loop and deal with this directory
-					}
-					else if(is_directory((*itr)->status())){
-						(*itr)++;
-						continue;
-					}
-					(*itr)++;
-					if(*itr==end_itr){
-						to_pop=true;
-						break;
-					}
-						
-					return *this;
-				}
-				
-				if(to_pop){ 
-					is_pop(&is, &itr);
-					delete itr;
-				}
-				
-			}	
-			*itr=end_itr;
-	        return *this;
+	    	FileSetIterator tmp = *this;
+	    	operator++();
+	        return tmp;
 	    }
 
 	    bool operator== (const FileSetIterator& other) const{
+	    	if(!itr){
+				if(!other.itr)
+					return true;
+				return false;
+			}
 	    	return (*itr==*other.itr);
 	    }
 
 		bool operator!=(const FileSetIterator& other) const{
+			if(!itr){
+				if(!other.itr)
+					return false;
+				return true;
+			}
 			return (*itr != *other.itr);
 		}
 
@@ -246,6 +236,7 @@ class FileSet{
 		FileSetIterator end(){
 			return FileSetIterator();
 		}
+
 
 	private:
 		//set<std::string> filenames;

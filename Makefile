@@ -37,14 +37,17 @@ build:
 	@- if [ ! -d "$(OBJDIR)" ]; then mkdir "$(OBJDIR)"; fi
 	@- if [ ! -d "$(BINDIR)" ]; then mkdir "$(BINDIR)"; fi
 
-
 .PHONY: lib
 
+
 lib:
-	cd lib/libsvm && make lib
+	@cd lib/libsvm && make lib
+	@cp lib/libsvm/*.so.* /usr/local/lib
+	@ldconfig
 
 
 .PHONY: clean
 clean:
+	@- cd lib/libsvm && make clean
 	@- $(RM) $(TARGET)
 	@- $(RM) $(OBJ)

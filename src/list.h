@@ -8,6 +8,8 @@ public:
 	List(T d);
 
 	~List(){
+		// delete data;
+		// delete next;
 		// List* cur = this;
 		// List* tmp;
 		// while(cur){
@@ -38,6 +40,12 @@ public:
 	}
 
 	void add(T data){
+		if(size==0){
+			this->data=data;
+			next=0;
+			size++;
+			return;
+		}
 		List* l = new List(data);
 		add_all(l);
 	}
@@ -62,7 +70,7 @@ public:
 	}
 
 	T data;
-	int size;
+	int size=0;
 	List<T> * next;
 
 

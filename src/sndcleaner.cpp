@@ -120,6 +120,9 @@ static void queue_flush(PacketQueue *q){
 		pt=q->first_pkt;
 	}
 	q->queue_operation_mutex.unlock();
+	q->nb_packets=0;
+	q->first_pkt=NULL;
+	q->last_pkt=NULL;
 }
 
 
@@ -241,15 +244,36 @@ SndCleaner::SndCleaner(ProgramOptions* op){
 
 
 
+void SndCleaner::reset(std::string f){
+	options->filename=f;
+	if(options->max_time>0){
+		max_byte = options->max_time*conversion_out_format.sample_rate*av_get_bytes_per_sample(conversion_out_format.sample_fmt);
+	}	
+	if(stream_opened){
+		rb_reset(data_buffer);
+		queue_flush(&audioq);
+		avcodec_free_context(&pCodecCtx);
+		swr_free(&swr);
+		pFormatCtx=NULL;
+		pCodecCtx=NULL;
+	}
+	swr = swr_alloc();
+	stream_opened=false;
+	received_packets=false;
+}
+
 SndCleaner::~SndCleaner(){
 	std::cout << "destructor called sndcleaner" << std::endl;
+	queue_flush(&audioq);
 	rb_free(data_buffer);
+	swr_free(&swr);
 	delete player;
 	delete spmanager;
+	avformat_close_input(&pFormatCtx);
 	pthread_mutex_destroy(&data_writable_mutex);
 	pthread_cond_destroy(&data_writable_cond);
-	avformat_free_context(pFormatCtx);
 	avcodec_free_context(&pCodecCtx);
+	
 }
 
 
@@ -338,6 +362,9 @@ void SndCleaner::open_stream(){
 		int a = skip_seconds(options->skip_time);
 		std::cout << a << " bytes skipped" << std::endl;
 	}
+	else{
+		std::cout << "No skip time" << std::endl;
+	}
 }
 
 
@@ -352,6 +379,9 @@ int SndCleaner::fill_packet_queue(){
 				if(packet_queue_put(&audioq, &packet)>=0){
 					nb++;
 				}
+				else{
+					std::cout << "impossible to put packet in queue" << std::endl;
+				}
 				break;
 			}
 			else {
@@ -360,6 +390,7 @@ int SndCleaner::fill_packet_queue(){
 			s=av_read_frame(pFormatCtx, &packet);
 		}
 		if(s<0){
+			std::cout << "no more packets" << std::endl;
 			no_more_packets=true;
 			return -1;
 		}
@@ -501,8 +532,12 @@ int SndCleaner::audio_decode_frame(AVCodecContext *pCodecCtx, uint8_t *audio_buf
     	av_free_packet(&pkt);
 
 
-    if(packet_queue_get(&audioq, &pkt) == 0) {
-    	return -1;
+    if(packet_queue_get(&audioq, &pkt) == 0){
+    	if(fill_packet_queue()<=0){
+    		std::cout << "fill packet queue <= 0 " << std::endl;
+    		return -1;
+    	}
+    	packet_queue_get(&audioq, &pkt);
     }
     audio_pkt_data = pkt.data;
     audio_pkt_size = pkt.size;
@@ -639,7 +674,6 @@ void* sc_dump_frames(void* thread_arg){
     	// }
     } 
     //sc->player->quit_all();
-    swr_free(&(sc->swr));
 }
 
 
@@ -1263,6 +1297,7 @@ void test_file_set(std::string path){
 	FileSetIterator end=f.end();
 	for(;it!=end;++it){
 		std::cout << *it << std::endl;
+		std::cout << "parent " << it.get_parent_name() << std::endl;
 	}
 }
 
@@ -1385,8 +1420,9 @@ void compute_features(SndCleaner* sc){
 
 
 void launch_training(std::string data_path, std::string label, ProgramOptions& op){
-	Trainer t = Trainer(data_path, label, op);
+	Trainer t = Trainer(data_path, label, op, SVM);
 	t.compute_all_features();
+	t.train_svm();
 }
 
 
@@ -1394,7 +1430,7 @@ int main(int argc, char *argv[]) {
 	ProgramOptions poptions;
 	bool test=false;
 	bool train=false;
-	std::string label="";
+	std::string out="";
   	po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
@@ -1409,7 +1445,7 @@ int main(int argc, char *argv[]) {
   		("find", po::bool_switch()->default_value(false), "tries to find arg1, in arg2")
   		("max", po::value(&poptions.max_time), "the maximum number of seconds to take into account")
     	("train", po::bool_switch(&train), "launches a training session")
-    	("label", po::value(&label), "label to associate with the training")
+    	("out", po::value(&out), "Name of the output file")
     	("skip", po::value(&poptions.skip_time), "number of seconds to skip at the beginning")
     ;
 
@@ -1429,7 +1465,7 @@ int main(int argc, char *argv[]) {
 
     if(train){
     	launch_training(vm["input"].as<std::vector<std::string>>()[0], 
-    		label, poptions);
+    		out, poptions);
     	return 0;
     }
 

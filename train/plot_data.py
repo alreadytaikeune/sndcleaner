@@ -6,7 +6,7 @@ from sklearn.decomposition import PCA
 from sklearn import svm
 from sklearn.cross_validation import train_test_split
 
-df = pd.read_csv("train3.csv", sep=" ", header=None)
+df = pd.read_csv("train5.csv", sep=" ", header=None)
 print len(df)
 
 
@@ -64,6 +64,7 @@ for k in range(len(pred)):
 
 print "speech correct: {0}".format(speech_correct/speech_nb)
 print "music correct: {0}".format(music_correct/music_nb)
+print "accuracy: {0}".format((music_correct+speech_correct)/(music_nb+speech_nb))
 
 
 for k in range(len(tX_test)):

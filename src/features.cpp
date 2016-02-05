@@ -1,6 +1,7 @@
 #include "features.h"
 #include "utils.h"
 #include <iostream>
+#include <sstream>
 
 RmsFeature::RmsFeature(){
 	res=10;
@@ -21,6 +22,7 @@ RmsFeature::RmsFeature(int r, int c){
 }
 
 RmsFeature::~RmsFeature(){
+	std::cout << "destructor rms" << std::endl;
 	dist_free(d);
 }
 
@@ -30,6 +32,10 @@ void RmsFeature::compute_feature(void* param){
 	double* data=p->data;
 	int len = p->len;
 	max_amp=max_abs(data, len);
+	if(max_amp==0){
+		std::cout << "Warning: max amp is 0" << std::endl;
+		max_amp=1;
+	}
 	dist_set_norm(d, max_amp);
 	dist_incrementd(d, data, len);
 	m=mean(data, len);
@@ -52,6 +58,50 @@ void RmsFeature::write_to_stream(std::ostream& out){
 	}
 	free(dist);
 }
+
+
+int RmsFeature::get_size(){
+	// mean + stddev + crop samples of distrib
+	return 2+crop;
+}
+
+int ZcFeature::get_size(){
+	// mean + stddev + crop samples of distrib
+	return 2+crop;
+}
+
+int LpcFeature::get_size(){
+	// mean + stddev + crop samples of distrib
+	return 2+crop;
+}
+
+double RmsFeature::get_nth_value(int n){
+	if(n==0)
+		return m;
+	else if(n==1)
+		return std_dev;
+	else if(n<crop+2)
+		return dist_get_ratio(d, n-2);
+}
+
+double ZcFeature::get_nth_value(int n){
+	if(n==0)
+		return m;
+	else if(n==1)
+		return std_dev;
+	else if(n<crop+2)
+		return dist_get_ratio(d, n-2);
+}
+
+double LpcFeature::get_nth_value(int n){
+	if(n==0)
+		return m;
+	else if(n==1)
+		return std_dev;
+	else if(n<crop+2)
+		return dist_get_ratio(d, n-2);
+}
+
 
 
 ZcFeature::ZcFeature(){
@@ -82,6 +132,10 @@ void ZcFeature::compute_feature(void* param){
 	double* data=p->data;
 	int len = p->len;
 	max_amp=max_abs(data, len);
+	if(max_amp==0){
+		std::cout << "Warning: max amp is 0" << std::endl;
+		max_amp=1;
+	}
 	dist_set_norm(d, max_amp);
 	dist_incrementd(d, data, len);
 	m=mean(data, len);
@@ -100,6 +154,8 @@ void ZcFeature::write_to_stream(std::ostream& out){
 }
 
 bool ZcFeature::is_valid(){
+	if(max_amp==0)
+		return false;
 	return true;
 }
 
@@ -132,6 +188,10 @@ void LpcFeature::compute_feature(void* param){
 	float* data=p->data;
 	int len = p->len;
 	max_amp=max_abs(data, len);
+	if(max_amp==0){
+		std::cout << "Warning: max amp is 0" << std::endl;
+		max_amp=1;
+	}
 	dist_set_norm(d, max_amp);
 	dist_incrementf(d, data, len);
 	m=mean(data, len);
@@ -151,6 +211,8 @@ void LpcFeature::write_to_stream(std::ostream& out){
 
 
 bool LpcFeature::is_valid(){
+	if(max_amp==0)
+		return false;
 	if(std_dev != std_dev)
 		return false;
 	if(m != m)
@@ -163,7 +225,6 @@ Features::Features(){
 }
 
 Features::~Features(){
-
 }
 
 void Features::add_feature(Feature* f){
@@ -182,10 +243,23 @@ void Features::write_to_stream(std::ostream& out){
 
 bool Features::is_valid(){
 	List<Feature*>* cur=&features;
+	std::ostream stream(nullptr);
+	stream.rdbuf(std::cout.rdbuf());
 	while(cur){
 		if(!cur->data->is_valid())
-			return false;
+			return false;	
 		cur=cur->next;
 	}
 	return true;
+}
+
+
+int Features::get_size(){
+	List<Feature*>* cur=&features;
+	int size=0;
+	while(cur){
+		size+=cur->data->get_size();
+		cur=cur->next;
+	}
+	return size;
 }
