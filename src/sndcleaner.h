@@ -7,6 +7,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
+#include <libavutil/samplefmt.h>
 #include <libavutil/opt.h>
 #include <plplot/plConfig.h>
 #include <plplot/plplot.h>
@@ -92,6 +93,7 @@ public:
 	*/
 	void compute_spectrogram();
 	void compute_spectrogram(int reader);
+	void compute_spectrogram_threaded(int reader);
 	std::vector<float>* compute_lpc(int reader);
 
 	void compute_mel_spectrogram();
@@ -113,6 +115,8 @@ public:
 	int get_time_in_bytes(float sec);
 
 	int register_reader();
+
+	int get_cutoff_index(float cutoff);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 
 	// processing berfore storing in the data buffer. It induces a performance hit but may become handy.

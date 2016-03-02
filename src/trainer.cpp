@@ -115,12 +115,15 @@ void Trainer::compute_all_features(){
 		assert(nb_samples_total == labels.size());
 		size_t s = alloc_svm();
 		std::cout << s << " bytes have been allocated fo SVM" << std::endl;
-
+		std::ofstream out_file;
+		out_file.open("./tests/result.txt", std::ofstream::out);
 		for(std::vector<Features*>::iterator i=features_vector.begin();
 			i!=features_vector.end();++i){
 			FeaturesIterator fend=(*i)->end();
 			FeaturesIterator fi = (*i)->begin();
 			if((*i)->is_valid()){
+				(*i)->write_to_stream(out_file);
+				out_file << inv_label_map[labels[k]] << "\n";
 				l=0;
 				j=0;
 				for(;fi!=fend;++fi){
@@ -143,7 +146,7 @@ void Trainer::compute_all_features(){
 		std::cout << "finished computing svm features, " << nb_samples_total - prob.l << " samples have been dropped\n";
 		
 		std::cout << "number of samples is " << prob.l << std::endl;
-		//normalize_svm_data();		
+		normalize_svm_data();		
 	}
 
 }
@@ -152,7 +155,7 @@ void Trainer::compute_all_features(){
 
 void Trainer::compute_features(SndCleaner* sc, std::string label){
 	sc->open_stream();
-	float global_wdw_sz=2000;
+	float global_wdw_sz=5000;
 	float local_wdw_sz=20;
 	float overlap=0;
 
@@ -370,8 +373,16 @@ void Trainer::print_problem(){
 
 
 void Trainer::normalize_svm_data(){
+	// print_problem();
 	std::cout << "normalizing problem at " << &prob << "\n";
 	double* tmp = (double *) calloc(sample_width, sizeof(double));
+	int* nb = (int *) calloc(sample_width, sizeof(int));
+	double* min = (double *) calloc(sample_width, sizeof(double));
+	for(int u=0;u<sample_width;u++)
+		min[u]=-1;
+	double* max = (double *) calloc(sample_width, sizeof(double));
+	int idx=0;
+	double val=0.;
 	int i=0;
 	int k;
 	for(k=0;k<prob.l;k++){
@@ -383,7 +394,16 @@ void Trainer::normalize_svm_data(){
 				std::cerr << "Format error in svm data" << std::endl;
 				exit(1);
 			}
-			tmp[prob.x[k][i].index]+=prob.x[k][i].value;
+			idx = prob.x[k][i].index;
+			val = prob.x[k][i].value;
+			tmp[idx]+=val;
+			nb[idx]++;
+			
+			if(min[idx] > val | min[idx]==-1)
+				min[idx] = val;
+			else if(max[idx] < val)
+				max[idx] = val;
+
 			i++;
 		}
 	}
@@ -401,10 +421,16 @@ void Trainer::normalize_svm_data(){
 				std::cerr << "Format error in svm data" << std::endl;
 				exit(1);
 			}
-			prob.x[k][i].value/=tmp[prob.x[k][i].index];
+			double val = prob.x[k][i].value;
+			int idx = prob.x[k][i].index;
+			double mval = tmp[idx]/nb[idx];
+			prob.x[k][i].value = (val - mval)/(max[idx] - min[idx]);
 			i++;
 		}
 	}
 	print_problem();
 	free(tmp);
+	free(min);
+	free(max);
+	free(nb);
 }

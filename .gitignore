@@ -6,3 +6,5 @@ train/data/*
 *~
 *.csv
 obj/*
+*.mp3
+

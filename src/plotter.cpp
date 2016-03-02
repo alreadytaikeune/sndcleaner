@@ -90,17 +90,20 @@ void plot_color_map2(SDL_Renderer* renderer, double** data, int d1, int d2, int 
 	std::cout << "h: " << h << std::endl;
 	r.y=0;
 	r.x=0;
-	int xnext;
-	int ynext;
+	int xnext=0;
+	int ynext=0;
 	for(i=0; i < d1; i+=x_step){
 		r.x=(int) (i/x_step)*rect_wf;
 		xnext=(int) (i/x_step+1)*rect_wf;
 		r.w=xnext-r.x;
+		ynext=0;
 		for(j=0; j < d2-1; j+=y_step){
-			r.y=(int) (j/y_step)*rect_h;
+			r.y=(int) (j/y_step)*rect_hf;
+			ynext=(int) (j/y_step+1)*rect_hf;
+			r.h=ynext-r.y;
 			//ynext = (int) (j/y_step+1)*rect_hf;
 			//r.h=ynext-r.y;
-			grey = (int) ((data[i][j]/150000.)*255);
+			grey = (int) ((data[i][j]/200000.)*255);
 			if(grey > 255)
 				grey=255;
 			SDL_SetRenderDrawColor(renderer, grey, grey, grey, 255);
@@ -118,7 +121,7 @@ void plot_vector(SDL_Window* window, SDL_Renderer* renderer,
 	int x_step=d1/w;
 	int this_h = (int) h*p;
 	if(x_step==0)
-		x_step=0;
+		x_step=1;
 	float m = max(data, d1);
 	std::cout << "max is: " << m << std::endl;
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);

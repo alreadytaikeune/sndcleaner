@@ -6,7 +6,7 @@ from sklearn.decomposition import PCA
 from sklearn import svm
 from sklearn.cross_validation import train_test_split
 
-df = pd.read_csv("train5.csv", sep=" ", header=None)
+df = pd.read_csv("train6.csv", sep=" ", header=None)
 print len(df)
 
 
@@ -32,7 +32,9 @@ music_correct=0.
 
 label=df[21].as_matrix()
 df=df.drop(df.columns[[21]], axis=1)
+print df
 df=df.apply(lambda x : (x - x.mean())/(x.max()-x.min()))
+print df
 pca = PCA(copy=True, n_components=0.7) # 70% of variance to explain
 
 X_train, X_test, y_train, y_test = train_test_split(df, label, test_size=0.2)

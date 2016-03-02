@@ -385,7 +385,7 @@ void lpc_filter_optimized(
   float R[order+1];	/* order+1 autocorrelation values of Sn[] */
   int i;
   for(int k=0; k<Nsam; k++){
-  	Wn[k]=(float) Sn[k]/32578;
+  	Wn[k]=(float) Sn[k]/32578.;
   }
   autocorrelate(Wn,R,Nsam,order);
 

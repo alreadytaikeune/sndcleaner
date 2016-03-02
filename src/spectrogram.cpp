@@ -15,10 +15,11 @@ Spectrogram::Spectrogram(int fsize){
 
 
 int Spectrogram::_realloc(){
-	std::cout << "reallocating..." << std::endl;
+	std::cout << "reallocating data at " << data << "..." << std::endl;
 	data = (double**) realloc(data, (size_t) sizeof(double)*temp_frames_nb*RESCALE_FACTOR);
 	if(data){
 		temp_frames_nb = (int)temp_frames_nb*RESCALE_FACTOR;
+		std::cout << "data is at " << data << std::endl;
 		return 0;
 	}
 	return -1;
@@ -31,6 +32,8 @@ int Spectrogram::add_spectrum(double* spec){
 		if(_realloc() < 0)
 			return -1;
 	}
+	if(current_frame>5000)
+		std::cout << "current frame is " << current_frame << " data is " << data << std::endl;
 	data[current_frame]=spec;
 	current_frame++;
 	return 0;
@@ -166,16 +169,16 @@ void Spectrogram::plot_up_to(float max_hz, float sampling){
 			SDL_RenderFillRect(renderer, &r);
 		}
 	}
-	for(i=0; i < current_frame; i+=x_step){
-		r.x=(i/x_step)*rect_w;
-		if(i/x_step % 10 == 0){
-			r.y=0;
-			r.h=h;
-			r.w=1;
-			SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-			SDL_RenderFillRect(renderer, &r);
-		}
-	}
+	// for(i=0; i < current_frame; i+=x_step){
+	// 	r.x=(i/x_step)*rect_w;
+	// 	if(i/x_step % 10 == 0){
+	// 		r.y=0;
+	// 		r.h=h;
+	// 		r.w=1;
+	// 		SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+	// 		SDL_RenderFillRect(renderer, &r);
+	// 	}
+	// }
 	SDL_RenderPresent(renderer);
 	SDL_Delay(5000);
 }
