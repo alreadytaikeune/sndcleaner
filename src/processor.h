@@ -86,4 +86,7 @@ void inverse_filter(float Sn[], float a[], int Nsam, float res[], int order);
 
 void synthesis_filter(float res[], float a[], int Nsam, int order,float Sn_[]);
 
+int resample(int16_t* in, int16_t* out, int n, float fin, float fout, int off);
+
+
 #endif

@@ -60,6 +60,18 @@ typedef struct ProgramOptions{
 } ProgramOptions;
 
 
+void options_copy(ProgramOptions* p1, ProgramOptions* p2){
+	p2->fft_size=p1->fft_size;
+	p2->with_playback=p1->with_playback;
+	p2->filename=p1->filename;
+	p2->take_half=p1->take_half;
+	p2->apply_window=p1->apply_window;
+	p2->window=p1->window;
+	p2->mel=p1->mel;
+	p2->max_time=p1->max_time;
+	p2->skip_time=p1->skip_time;
+}
+
 class SndCleaner{
 public:
 	void open_stream();
@@ -117,6 +129,8 @@ public:
 	int register_reader();
 
 	int get_cutoff_index(float cutoff);
+
+	int pull_data(uint8_t* buf, int size, int reader);
 
 	// This stream buffer may not appear very useful for now but might become when we'll be doing further 
 	// processing berfore storing in the data buffer. It induces a performance hit but may become handy.

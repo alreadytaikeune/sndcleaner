@@ -603,3 +603,15 @@ float lpc_from_data(float *data,float *lpci,int n,int m){
 
   return error;
 }
+
+
+int resample(int16_t* in, int16_t* out, int n, float fin, float fout, int off){
+	if(fout > fin)
+		return -1;
+	int step = (int) fin/fout;
+	int k=0;
+	for(k=0;off+k<n;k+=step){
+		out[k/step]=in[off+k];
+	}
+	return k/step;
+}

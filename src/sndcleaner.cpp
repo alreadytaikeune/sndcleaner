@@ -922,36 +922,45 @@ void test_synthetize_signal(){
 
 }
 
+
+int SndCleaner::pull_data(uint8_t* buf, int size, int reader){
+	int len, lread, total_read;
+	len=size;
+	lread=0;
+	total_read=0;
+	while(len>0){
+		lread=rb_read(data_buffer, (uint8_t *) buf+total_read, reader, (size_t) len); 
+		len-=lread;
+		total_read+=lread;
+		if(lread==0 && fill_buffer()<=0){
+			break;
+		}
+	}
+	return total_read;
+}
+
+
 void lpc_synthetise_out(FILE* f, float coefs[], int p, const int n, int16_t* data,
-	int16_t* synth, int buf_size, AVCodecContext *c, AVPacket &pkt, AVFrame* frame){
+	int16_t* synth, int buf_size, AVCodecContext *c, AVPacket &pkt, AVFrame* frame,
+	float* buf, float *res, int voiced){
 	static int got_output=0;
 	static int synth_idx=0;
 	static int ret;
-	static unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-	static std::default_random_engine generator (seed);
-
-  	static std::normal_distribution<double> distribution (0.0,0.5);
-
-	float* buf = (float*) malloc(n*sizeof(float));
-	float* carrier = (float*) malloc(n*sizeof(float));
-	for(int i=0;i<n;i++){
-		buf[i]=(float) data[i]/32578.;
-		// carrier[i] = (float) distribution(generator);
-		// if (carrier[i]>1)
-		// 	carrier[i]=1.f;
-		// carrier[i]=0.5f;:
-		carrier[i] = (float) sin(880*i/44100.);
-	}
 	
-	float *res = (float*) calloc(n, sizeof(float));
+	for(int i=0;i<n;i++){
+		buf[i+p]=(float) data[i]/32578.;
+		// buf[i+p]=0.f;
+	}
 
-	inverse_filter(buf+p, coefs, n-p, res, p);
+	//inverse_filter(buf, coefs, n, res, p);
+	if(voiced){
+		synthesis_filter(res, coefs, n, p, buf+p);
+	}
 
-	synthesis_filter(res, coefs, n-p, p, carrier+p);
 	//std::cout << "synth index " << synth_idx << std::endl;
 	for(int i=0;i<n;i++){
-		//synth[synth_idx]=(int16_t) (buf[i]*32578);
-		synth[synth_idx]=(int16_t) (carrier[i]*32578);
+		synth[synth_idx]=(int16_t) (buf[i+p]*32578);
+		//synth[synth_idx]=(int16_t) (carrier[i]*32578);
 		synth_idx++;
 		if(synth_idx==c->frame_size){
 			av_init_packet(&pkt);
@@ -970,13 +979,25 @@ void lpc_synthetise_out(FILE* f, float coefs[], int p, const int n, int16_t* dat
 		}
 
 	}
-    free(buf);
-	free(res);
+	for(int k=0; k<p; k++){
+		buf[k]=buf[n+k];
+	}
+
 }
+
 
 
 std::vector<float>* SndCleaner::compute_lpc(int reader){
 	std::cout << "starting to compute lpc\n";
+	static unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+	static std::default_random_engine generator (seed);
+
+  	static std::normal_distribution<double> distribution (0.0,0.001);
+  	ProgramOptions op;
+  	options_copy(this->options, &op);
+  	op.filename="train/data/music/lowrider.mp3";
+  	SndCleaner sc(&op);
+  	sc.open_stream();
 	AVFrame *frame=frame = av_frame_alloc();
 	if (!frame) {
         fprintf(stderr, "Could not allocate audio frame\n");
@@ -986,11 +1007,14 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
     AVPacket pkt;
 	AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_MP3);
 	AVCodecContext *c= avcodec_alloc_context3(codec);
+	float out_rate=22050.;
+
 	c->bit_rate=64000;
 	c->channels = 1;
-	c->sample_rate = 44100;
+	c->sample_rate = out_rate;
 	c->sample_fmt= AV_SAMPLE_FMT_S16P;
 	c->channel_layout=AV_CH_LAYOUT_MONO;
+
 
     if (!check_sample_fmt(codec, c->sample_fmt)) {
         fprintf(stderr, "Encoder does not support sample format %s\n",
@@ -1009,18 +1033,35 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
         fprintf(stderr, "could not open lpc_synth\n");
         exit(1);
     }
-	float nb_milliseconds=20;
-	int p = 10;
-	int len,lread=0;
-	int total_read=0;
-	const int window_size = get_time_in_bytes(nb_milliseconds/1000);
-	int flen=window_size;
-	int16_t* pulled_data = (int16_t *) malloc(window_size);
-	float coefs[p+1];
-	std::vector<float>* errors = new std::vector<float>(0);
-
 
 	int synth_size = av_samples_get_buffer_size(NULL, c->channels, c->frame_size, c->sample_fmt, 0);
+
+	frame->nb_samples     = c->frame_size;
+	frame->format         = c->sample_fmt;
+	frame->channel_layout = c->channel_layout;
+	float 			nb_milliseconds=20;
+	int 			p = 10;
+	int 			len,lread=0;
+	int 			total_read=0;
+	int 			total_read2=0;
+	const int 		window_size = get_time_in_bytes(nb_milliseconds/1000);
+	int 			flen=window_size;
+	int 			n = (int)(window_size*(out_rate/44100.));
+
+	int16_t* 		pulled_data = (int16_t *) malloc(window_size);
+	int16_t* 		music_data = (int16_t *) malloc(window_size);
+	int16_t* 		resampled = (int16_t*) malloc(n);
+	int16_t* 		resampled_mus = (int16_t*) malloc(n);
+	float 			coefs[p+1];
+	int 			offset=0;
+	int 			r_step = (int) (44100/out_rate);
+
+	float* buf = (float*) calloc(n/2+p, sizeof(float));
+	float *res = (float*) calloc(n/2, sizeof(float));
+	std::vector<float>* errors = new std::vector<float>(0);
+	std::vector<float> zc_vector(0);
+	
+	std::cout << "n is " << n << std::endl;
 
 	std::cout << "sample rate: " << c->sample_rate << std::endl;
 	std::cout << "channels: " << c->channel_layout << std::endl;
@@ -1029,17 +1070,12 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 	std::cout << "required buffer size: " << synth_size << std::endl;
 	std::cout << "window size: " << window_size << std::endl;
 
-	frame->nb_samples     = c->frame_size;
-	frame->format         = c->sample_fmt;
-	frame->channel_layout = c->channel_layout;
 
 	uint8_t* synth = (uint8_t*) malloc(synth_size*sizeof(uint8_t));
 
-	std::cout << "synth " << synth << std::endl;
 	int ret = avcodec_fill_audio_frame(frame, c->channels, c->sample_fmt,
         (const uint8_t*)synth, synth_size, 0);
 
-	std::cout << "frame data " << frame->data << std::endl;
 	if (ret < 0) {
 		fprintf(stderr, "Could not setup audio frame, error %d\n", ret);
 		exit(1);
@@ -1047,23 +1083,34 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 	fill_buffer();
 	float error=0.;
 	while(1){
-		if(rb_get_read_space(data_buffer, reader)==0){
-			if(fill_buffer()<=0)
-				break;
+
+		total_read=pull_data((uint8_t*) pulled_data, (int) window_size, reader);
+		total_read2=sc.pull_data((uint8_t*)music_data, (int) window_size, 0);
+
+		if(total_read!=total_read2){
+			std::cerr << "Inconherent bytes read number is lpc synth" << std::endl;
 		}
-		len=flen;
-		lread=0;
-		total_read=0;
-		while(len>0){
-			lread=rb_read(data_buffer, (uint8_t *) pulled_data+total_read, reader, (size_t) len); 
-			len-=lread;
-			total_read+=lread;
-			if(lread==0 && fill_buffer()<=0){
-				break;
-			}
+
+		if(total_read == 0){
+			break;
 		}
-		lpc_filter_optimized(pulled_data, coefs, total_read/2, p, &error);
-		lpc_synthetise_out(f, coefs, p, total_read/2, pulled_data, (int16_t*) synth, synth_size/2, c, pkt, frame);
+		int r = resample(pulled_data, resampled, total_read/2, 44100., out_rate, offset);
+		resample(music_data, resampled_mus, total_read2/2, 44100., out_rate, offset);
+		if(r==-1)
+			exit(1);
+		offset = r_step-(total_read/2-1)%r_step;
+		
+		for(int i=0;i<n/2;i++){
+			res[i] = (float) 0.1*resampled_mus[i]/32578;
+		}
+
+		float z = zero_crossing_rate(resampled, r);
+		zc_vector.push_back(z);
+		//int voiced = z > 0.1 ? 0 : 1;
+		int voiced=0;
+		lpc_filter_optimized(resampled, coefs, r, p, &error);
+
+		lpc_synthetise_out(f, coefs, p, r, resampled, (int16_t*) synth, synth_size/2, c, pkt, frame, buf, res, voiced);
 		errors->push_back(error);
 	}
 	int i=0,got_output=1;
@@ -1085,11 +1132,15 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
         }
     }
 
+    plotData(&((*errors)[0]), errors->size());
+    plotData(&(zc_vector)[0], zc_vector.size());
 	free(pulled_data);
 	av_frame_free(&frame);
 	fclose(f);
 	free(synth);
-
+	free(buf);
+	free(res);
+	free(resampled);
 	return errors;
 }
 
