@@ -54,12 +54,14 @@ void SpectrumManager::set_fft_size(int s){
 void SpectrumManager::compute_spectrum(int16_t* in, double* out){
 	int i;
 	for(i=0;i<fft_size;i++){
-		fft_in[0][i]=(double) in[i];
+		fft_in[i][0]=(double) in[i];
+		fft_in[i][1]=0.;
 	}
 	// std::cout << "reading in at " << in << " up to address " << &in[fft_size-1] << std::endl;
 	if(GET_DO_WINDOWING(pipeline_plan)){
 		// std::cout << "applying window" << std::endl;
-		apply_window(fft_in[0], fft_size, window_type);
+		for(int i=0; i<fft_size; i++)
+			apply_window_idx(&fft_in[i][0], fft_size, window_type, i);
 		// std::cout << "applied" << std::endl;
 	}
 	

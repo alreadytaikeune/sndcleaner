@@ -347,10 +347,12 @@ void SndCleaner::open_stream(){
 	conversion_in_format.sample_rate = pCodecCtx->sample_rate;
 	conversion_in_format.channel_layout = pCodecCtx->channel_layout;
 
-	// std::cout << conversion_in_format.sample_fmt << std::endl;
-	// std::cout << conversion_in_format.sample_rate << std::endl;
-	// std::cout << conversion_in_format.channel_layout << std::endl;
-
+	std::cout << conversion_in_format.sample_fmt << std::endl;
+	std::cout << conversion_in_format.sample_rate << std::endl;
+	std::cout << conversion_in_format.channel_layout << std::endl;
+	if(conversion_in_format.channel_layout==0){
+		conversion_in_format.channel_layout = AV_CH_LAYOUT_STEREO;
+	}
 
 	av_opt_set_int(swr, "in_channel_layout",  conversion_in_format.channel_layout, 0);
 	av_opt_set_int(swr, "out_channel_layout", conversion_out_format.channel_layout,  0);
@@ -987,7 +989,7 @@ void lpc_synthetise_out(FILE* f, float coefs[], int p, const int n, int16_t* dat
 
 
 
-std::vector<float>* SndCleaner::compute_lpc(int reader){
+void SndCleaner::compute_lpc(int reader, std::vector<float>* errors){
 	std::cout << "starting to compute lpc\n";
 	static unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 	static std::default_random_engine generator (seed);
@@ -1007,7 +1009,7 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
     AVPacket pkt;
 	AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_MP3);
 	AVCodecContext *c= avcodec_alloc_context3(codec);
-	float out_rate=22050.;
+	float out_rate=11025.;
 
 	c->bit_rate=64000;
 	c->channels = 1;
@@ -1015,6 +1017,7 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 	c->sample_fmt= AV_SAMPLE_FMT_S16P;
 	c->channel_layout=AV_CH_LAYOUT_MONO;
 
+	Spectrogram* s = new Spectrogram(500);
 
     if (!check_sample_fmt(codec, c->sample_fmt)) {
         fprintf(stderr, "Encoder does not support sample format %s\n",
@@ -1044,7 +1047,8 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 	int 			len,lread=0;
 	int 			total_read=0;
 	int 			total_read2=0;
-	const int 		window_size = get_time_in_bytes(nb_milliseconds/1000);
+	//const int 		window_size = get_time_in_bytes(nb_milliseconds/1000);
+	const int 		window_size = 2048;
 	int 			flen=window_size;
 	int 			n = (int)(window_size*(out_rate/44100.));
 
@@ -1055,11 +1059,24 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 	float 			coefs[p+1];
 	int 			offset=0;
 	int 			r_step = (int) (44100/out_rate);
+	int fft_size;
+	if(n%2)
+		fft_size = n/2-1;
+	else
+		fft_size = n/2;
+	spmanager->set_fft_size(fft_size);
+	spmanager->set_pipeline(APPLY_WINDOW | OPEN_MODE_NORMAL);
+	spmanager->set_window(WINDOW_RECT);
+	if(spmanager->register_spectrogram(s, OPEN_MODE_NORMAL)<0){
+		std::cerr << "impossible to register spectrogram" << std::endl;
+		exit(EXIT_FAILURE);
+	}
 
 	float* buf = (float*) calloc(n/2+p, sizeof(float));
 	float *res = (float*) calloc(n/2, sizeof(float));
-	std::vector<float>* errors = new std::vector<float>(0);
+	errors = new std::vector<float>(0);
 	std::vector<float> zc_vector(0);
+	std::vector<float*> coefs_vector(0);
 	
 	std::cout << "n is " << n << std::endl;
 
@@ -1110,30 +1127,43 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 		int voiced=0;
 		lpc_filter_optimized(resampled, coefs, r, p, &error);
 
-		lpc_synthetise_out(f, coefs, p, r, resampled, (int16_t*) synth, synth_size/2, c, pkt, frame, buf, res, voiced);
+		float* cc = (float*) malloc((p+1)*sizeof(float));
+		double* spec = (double*) malloc(fft_size*sizeof(double));
+		memcpy(cc, coefs, (p+1)*sizeof(float));
+
+		spmanager->compute_spectrum(resampled, spec);
+		coefs_vector.push_back(cc);
+
+		//lpc_synthetise_out(f, coefs, p, r, resampled, (int16_t*) synth, synth_size/2, c, pkt, frame, buf, res, voiced);
 		errors->push_back(error);
 	}
 	int i=0,got_output=1;
 	/*
 		Flushing what remains in the conversion buffer
 	*/
-	std::cout << "flushing the encoding buffer" << std::endl;
-	for (got_output = 1; got_output; i++) {
-        ret = avcodec_encode_audio2(c, &pkt, NULL, &got_output);
-        if (ret < 0) {
-            fprintf(stderr, "Error encoding frame\n");
-            exit(1);
-        }
+	//std::cout << "flushing the encoding buffer" << std::endl;
+	// for (got_output = 1; got_output; i++) {
+ //        ret = avcodec_encode_audio2(c, &pkt, NULL, &got_output);
+ //        if (ret < 0) {
+ //            fprintf(stderr, "Error encoding frame\n");
+ //            exit(1);
+ //        }
  
-        if (got_output) {
-        	std::cout << "one more packet" << std::endl;
-            fwrite(pkt.data, 1, pkt.size, f);
-            av_free_packet(&pkt);
-        }
+ //        if (got_output) {
+ //        	std::cout << "one more packet" << std::endl;
+ //            fwrite(pkt.data, 1, pkt.size, f);
+ //            av_free_packet(&pkt);
+ //        }
+ //    }
+
+    vocoder_model_plotter(&(coefs_vector)[0], coefs_vector.size(), p+1, 4000.f, out_rate, fft_size/2, s->get_data());
+
+    for(int i=0; i<coefs_vector.size(); i++){
+    	free(coefs_vector[i]);
     }
 
-    plotData(&((*errors)[0]), errors->size());
-    plotData(&(zc_vector)[0], zc_vector.size());
+    // plotData(&((*errors)[0]), errors->size());
+    // plotData(&(zc_vector)[0], zc_vector.size());
 	free(pulled_data);
 	av_frame_free(&frame);
 	fclose(f);
@@ -1141,7 +1171,10 @@ std::vector<float>* SndCleaner::compute_lpc(int reader){
 	free(buf);
 	free(res);
 	free(resampled);
-	return errors;
+	free(resampled_mus);
+	free(music_data);
+	avcodec_free_context(&c);
+	//delete s; // no need, this is done in the spmanager destructor
 }
 
 void* spectrogram_thread(void* arg){
@@ -1154,9 +1187,11 @@ void* lpc_thread(void* args){
 	SndCleaner* sc = (SndCleaner*) targs->sc;
 	int reader = sc->register_reader();
 	std::cout << "reader successfully allocated at: " << reader << std::endl;
-	std::vector<float>* errors = sc->compute_lpc(reader);
+	std::vector<float>* errors;
+	sc->compute_lpc(reader, errors);
 	targs->errors=(float*)&(*errors)[0];
 	targs->nb_errors=errors->size();
+	delete errors;
 }
 
 
@@ -1184,7 +1219,6 @@ void spectrogram_with_lpc(SndCleaner* sc){
 	pthread_join(t_spec, NULL);
 
 	Spectrogram* s = sc->spmanager->get_spectrogram();
-	s->initialize_for_rendering();
 	//s->plot_up_to(8000, sc->get_sampling());
 	int d1 = s->get_current_frame();
 	int d2 = sc->get_cutoff_index(8.0e3); // 8kHz cropping
@@ -1277,17 +1311,17 @@ void test_spectrogram(SndCleaner* cleaner){
 		//cleaner->compute_spectrogram();
 	}
 	else{
-		cleaner->compute_spectrogram();
+		cleaner->compute_spectrogram_threaded(0);
 	}
 	
 	pthread_join(dump_thread, NULL);
 	std::cout << "dump thread joined" << std::endl;
 	Spectrogram* s = cleaner->spmanager->get_spectrogram();
-	s->initialize_for_rendering();
 
-	s->plot_up_to(8000.f, cleaner->get_sampling());
-	s->dump_in_bmp("spectrogram");
+	s->plot_up_to(4000.f, cleaner->get_sampling());
 }
+
+
 
 void test_mask(SndCleaner* cleaner){
 	Spectrogram* s = cleaner->spmanager->get_spectrogram();
@@ -1519,8 +1553,6 @@ void test_processing_functions(SndCleaner* sc){
 		//rms_vector.push_back(root_mean_square(pulled_data+total_read/2-(flen-len)/2, (flen-len)/2));
 		zc_vector.push_back(zero_crossing_rate(pulled_data+total_read/2-(flen-len)/2, (flen-len)/2));
 	}
-	std::cout << "out" << std::endl;
-	//plot_color_map("radio", &bands_vector[0], bands_vector.size(), nb_bands);
 	
 	//plot_histogram(distrib, nb_bands);
 	//plotData((double*)&rms_vector[0], rms_vector.size());
@@ -1538,7 +1570,9 @@ void test_processing_functions(SndCleaner* sc){
 
 void test_lpc(SndCleaner* sc){
 	sc->open_stream();
-	sc->compute_lpc(0);
+	std::vector<float>* errors;
+	sc->compute_lpc(0, errors);
+	delete errors;
 }
 
 
@@ -1679,8 +1713,8 @@ void launch_training(std::string data_path, std::string label, ProgramOptions& o
 
 int main(int argc, char *argv[]) {
 	ProgramOptions poptions;
-	bool test=false;
 	bool train=false;
+	int test;
 	std::string out="";
   	po::options_description desc("Allowed options");
     desc.add_options()
@@ -1692,7 +1726,7 @@ int main(int argc, char *argv[]) {
     	("apply-window,w", po::bool_switch(&poptions.apply_window), "should an windowing function be applied")
     	("window-type", po::value(&poptions.window), "the windowing function to apply.\n\t1: rectangular\n\t2: blackmann\n\t4: hanning\n\t8: hamming")
      	("mel", po::value(&poptions.mel), "If set, the spectrum will be converted to mel scale with the specified number of windows")
-        ("test,t", po::bool_switch(&test)->default_value(false), "run tests")
+        ("test,t", po::value(&test)->default_value(0), "run tests")
   		("find", po::bool_switch()->default_value(false), "tries to find arg1, in arg2")
   		("max", po::value(&poptions.max_time), "the maximum number of seconds to take into account")
     	("train", po::bool_switch(&train), "launches a training session")
@@ -1758,12 +1792,15 @@ int main(int argc, char *argv[]) {
 		    }
 		    poptions.filename=vm["input"].as<std::vector<std::string>>()[0];
     		SndCleaner sc(&poptions);
-    		//test_spectrogram(&sc);
+    		if(test==1)
+    			test_spectrogram(&sc);
     		//spectrogram_with_lpc(&sc);
     		// test_mask(&sc);
-    		// test_playback(&sc);
+    		if(test==2)
+    			test_playback(&sc);
     		// test_processing_functions(&sc);
-    		 test_lpc(&sc);
+    		if(test==3)
+    			test_lpc(&sc);
     		// compute_features(&sc);
     		return 0;
     	}	

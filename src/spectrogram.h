@@ -11,7 +11,6 @@ public:
 	int shrink();
 	int add_spectrum(double* spec);
 	int add_spectrum_with_copy(double* spec);
-	int initialize_for_rendering();
 	SDL_Window* get_window();
 	void plot();
 	void plot_up_to(float max_hz, float sampling);

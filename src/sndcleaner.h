@@ -106,7 +106,7 @@ public:
 	void compute_spectrogram();
 	void compute_spectrogram(int reader);
 	void compute_spectrogram_threaded(int reader);
-	std::vector<float>* compute_lpc(int reader);
+	void compute_lpc(int reader, std::vector<float>* errors);
 
 	void compute_mel_spectrogram();
 	int get_mel_size();

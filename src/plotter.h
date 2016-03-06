@@ -10,9 +10,9 @@ extern "C" {
 #include <SDL2/SDL.h>
 #include <string>
 
-void plot_color_map(std::string filename, float** data, int d1, int d2);
+void plot_color_map(std::string filename, double** data, int d1, int d2);
 void plot_lpc_data(std::string filename, double** data, int d1, int d2, float* lpc_errors, int l1);
-
+void plot_color_map2(SDL_Renderer* renderer, double** data, int d1, int d2, int w, int h);
 template<typename T>
 void plotData(T* data, int len){
 	PLFLT x[len];
@@ -59,3 +59,6 @@ void plot_histogram(T* data, int nb_bands){
     }
     plend();
 }
+
+
+void vocoder_model_plotter(float** coefs, int n, int p, float freq_max, float sample_rate, int spec_size, double** spec);
